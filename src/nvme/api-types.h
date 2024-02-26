@@ -126,6 +126,21 @@ struct nvme_set_features_args {
 	__u8 fid;
 };
 
+
+struct nvme_abort_args
+{
+	__u32 *result;
+	int args_size;
+	int fd;
+	__u32 timeout;
+	__u16 cid;
+	__u16 sqid;
+	__u32 cdw11;
+	__u32 cdw12;
+	__u32 cdw13;
+	__u32 cdw15;
+};
+
 /**
  * struct nvme_get_features_args - Arguments for the NVMe Admin Get Feature command
  * @args_size:	Size of &struct nvme_get_features_args

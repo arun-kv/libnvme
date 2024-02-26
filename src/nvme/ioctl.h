@@ -2168,6 +2168,8 @@ static inline int nvme_get_log_persistent_event(int fd,
 	return nvme_get_log_page(fd, NVME_LOG_PAGE_PDU_SIZE, &args);
 }
 
+
+int nvme_abort(struct nvme_abort_args *args);
 /**
  * nvme_set_features() - Set a feature attribute
  * @args:	&struct nvme_set_features_args argument structure

@@ -363,6 +363,10 @@ enum nvme_cmd_dword_fields {
 	NVME_ZNS_MGMT_RECV_ZRAS_FEAT_MASK			= 0x1,
 	NVME_DIM_TAS_SHIFT					= 0,
 	NVME_DIM_TAS_MASK					= 0xF,
+	NVME_ABORT_CDW10_SQID_SHIFT				= 0,
+	NVME_ABORT_CDW10_SQID_MASK				= 0xff,
+	NVME_ABORT_CDW10_CID_SHIFT				= 16,
+	NVME_ABORT_CDW10_CID_MASK				= 0xffff,
 };
 
 enum features {
@@ -520,6 +524,32 @@ int nvme_get_log_page(int fd, __u32 xfer_len, struct nvme_get_log_args *args)
 	} while (offset < data_len);
 
 	return 0;
+}
+
+
+int nvme_abort(struct nvme_abort_args *args)
+{
+	__u32 cdw10 = NVME_SET(args->sqid, ABORT_CDW10_SQID) |
+			NVME_SET(args->cid, ABORT_CDW10_CID);
+
+	struct nvme_passthru_cmd cmd = {
+		.opcode		= nvme_admin_abort_cmd,
+		.nsid		= 0,
+		.cdw10		= cdw10,
+		.cdw11		= 0,
+		.cdw12		= 0,
+		.cdw13		= 0,
+		.cdw14		= 0,
+		.cdw15		= 0,
+		.timeout_ms	= args->timeout,
+	};
+	if (args->args_size < sizeof(*args)) {
+		errno = EINVAL;
+		return -1;
+	}
+	return nvme_submit_admin_passthru(args->fd, &cmd, args->result);
+
+
 }
 
 int nvme_set_features(struct nvme_set_features_args *args)

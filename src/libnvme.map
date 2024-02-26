@@ -280,6 +280,7 @@ LIBNVME_1_0 {
 		nvme_scan_subsystems;
 		nvme_security_receive;
 		nvme_security_send;
+		nvme_abort;
 		nvme_set_features;
 		nvme_set_features_arbitration;
 		nvme_set_features_async_event;
