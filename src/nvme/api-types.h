@@ -643,6 +643,7 @@ struct nvme_io_args {
 	__u64 reftag_u64;
 	__u8 sts;
 	__u8 pif;
+	__u8 flags;
 };
 
 /**

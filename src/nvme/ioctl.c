@@ -1943,6 +1943,7 @@ int nvme_io(struct nvme_io_args *args, __u8 opcode)
 
 	struct nvme_passthru_cmd cmd = {
 		.opcode		= opcode,
+		.flags          = args->flags,
 		.nsid		= args->nsid,
 		.cdw2		= cdw2,
 		.cdw3		= cdw3,
