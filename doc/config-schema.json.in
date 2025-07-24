@@ -98,6 +98,18 @@
 		    "description": "Controller DH-HMAC-CHAP key",
 		    "type": "string"
 		},
+		"keyring": {
+		    "description": "Keyring for TLS key lookup",
+		    "type": "string"
+		},
+		"tls_key_identity": {
+		    "description": "PSK identity for the TLS PSK (tls_key)",
+		    "type": "string"
+		},
+		"tls_key": {
+		    "description": "TLS PSK in PSK interchange format",
+		    "type": "string"
+		},
 		"nr_io_queues": {
 		    "description": "Number of I/O queues",
 		    "type": "integer"
@@ -155,14 +167,6 @@
 		    "description": "Enable data digest",
 		    "type": "boolean",
 		    "default": false
-		},
-		"keyring": {
-		    "description": "Keyring for TLS key lookup",
-		    "type": "integer"
-		},
-		"tls_key": {
-		    "description": "TLS key for the connection",
-		    "type": "integer"
 		},
 		"tls": {
 		    "description": "Enable TLS encryption",

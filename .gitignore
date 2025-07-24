@@ -11,7 +11,9 @@ cscope.*
 compile_commands.json
 
 .build
+.build-tools
 .cache
+.vscode/
 
 subprojects/*
 !subprojects/*.wrap

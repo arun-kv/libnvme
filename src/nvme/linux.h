@@ -11,8 +11,8 @@
 
 #include <stddef.h>
 
-#include "ioctl.h"
-#include "types.h"
+#include <nvme/ioctl.h>
+#include <nvme/types.h>
 
 /**
  * DOC: linux.h
@@ -33,20 +33,6 @@
  */
 int nvme_fw_download_seq(int fd, __u32 size, __u32 xfer, __u32 offset,
 			 void *buf);
-
-/**
- * enum nvme_telemetry_da - Telemetry Log Data Area
- * @NVME_TELEMETRY_DA_1:	Data Area 1
- * @NVME_TELEMETRY_DA_2:	Data Area 2
- * @NVME_TELEMETRY_DA_3:	Data Area 3
- * @NVME_TELEMETRY_DA_4:	Data Area 4
- */
-enum nvme_telemetry_da {
-	NVME_TELEMETRY_DA_1	= 1,
-	NVME_TELEMETRY_DA_2	= 2,
-	NVME_TELEMETRY_DA_3	= 3,
-	NVME_TELEMETRY_DA_4	= 4,
-};
 
 /**
  * nvme_get_telemetry_max() - Get telemetry limits
@@ -127,6 +113,16 @@ int nvme_get_host_telemetry(int fd,  struct nvme_telemetry_log **log,
  */
 int nvme_get_new_host_telemetry(int fd,  struct nvme_telemetry_log **log,
 		enum nvme_telemetry_da da, size_t *size);
+
+/**
+ * nvme_get_ana_log_len_from_id_ctrl() - Retrieve maximum possible ANA log size
+ * @id_ctrl:	Controller identify data
+ * @rgo:	If true, return maximum log page size without NSIDs
+ *
+ * Return: A byte limit on the size of the controller's ANA log page
+ */
+size_t nvme_get_ana_log_len_from_id_ctrl(const struct nvme_id_ctrl *id_ctrl,
+					 bool rgo);
 
 /**
  * nvme_get_ana_log_len() - Retrieve size of the current ANA log
@@ -274,6 +270,72 @@ long nvme_lookup_key(const char *type, const char *identity);
 int nvme_set_keyring(long keyring_id);
 
 /**
+ * nvme_read_key() - Read key raw data
+ * @keyring_id:     Id of the keyring holding %key_id
+ * @key_id:      Key id
+ * @len:         Length of the returned data
+ *
+ * Links the keyring specified by @keyring_id into the session
+ * keyring and reads the payload of the key specified by @key_id.
+ * @len holds the size of the returned buffer.
+ * If @keyring is 0 the default keyring '.nvme' is used.
+ *
+ * Return: Pointer to the payload on success,
+ * or NULL with errno set otherwise.
+ */
+unsigned char *nvme_read_key(long keyring_id, long key_id, int *len);
+
+/**
+ * nvme_update_key() - Update key raw data
+ * @keyring_id:  Id of the keyring holding %key_id
+ * @key_type:    Type of the key to insert
+ * @identity:    Key identity string
+ * @key_data:    Raw data of the key
+ * @key_len:     Length of @key_data
+ *
+ * Links the keyring specified by @keyring_id into the session
+ * keyring and updates the key reference by @identity with @key_data.
+ * The old key with identity @identity will be revoked to make it
+ * inaccessible.
+ *
+ * Return: Key id of the new key or 0 with errno set otherwise.
+ */
+long nvme_update_key(long keyring_id, const char *key_type,
+		     const char *identity, unsigned char *key_data,
+		     int key_len);
+
+/**
+ * typedef nvme_scan_tls_keys_cb_t - Callback for iterating TLS keys
+ * @keyring:	Keyring which has been iterated
+ * @key:	Key for which the callback has been invoked
+ * @desc:	Description of the key
+ * @desc_len:	Length of @desc
+ * @data:	Pointer for caller data
+ *
+ * Called for each TLS PSK in the keyring.
+ */
+typedef void (*nvme_scan_tls_keys_cb_t)(long keyring, long key,
+					char *desc, int desc_len, void *data);
+
+/**
+ * nvme_scan_tls_keys() - Iterate over TLS keys in a keyring
+ * @keyring:	Keyring holding TLS keys
+ * @cb:		Callback function
+ * @data:	Pointer for data to be passed to @cb
+ *
+ * Iterates @keyring and call @cb for each TLS key. When @keyring is NULL
+ * the default '.nvme' keyring is used.
+ * A TLS key must be of type 'psk' and the description must be of the
+ * form 'NVMe<0|1><R|G>0<1|2> <identity>', otherwise it will be skipped
+ * during iteration.
+ *
+ * Return: Number of keys for which @cb was called, or -1 with errno set
+ * on error.
+ */
+int nvme_scan_tls_keys(const char *keyring, nvme_scan_tls_keys_cb_t cb,
+		       void *data);
+
+/**
  * nvme_insert_tls_key() - Derive and insert TLS key
  * @keyring:    Keyring to use
  * @key_type:	Type of the resulting key
@@ -334,5 +396,117 @@ long nvme_insert_tls_key_versioned(const char *keyring, const char *key_type,
 char *nvme_generate_tls_key_identity(const char *hostnqn, const char *subsysnqn,
 				     int version, int hmac,
 				     unsigned char *configured_key, int key_len);
+
+/**
+ * nvme_revoke_tls_key() - Revoke TLS key from keyring
+ * @keyring:    Keyring to use
+ * @key_type:    Type of the key to revoke
+ * @identity:    Key identity string
+ *
+ * Return: 0 on success or on failure -1 with errno set.
+ */
+long nvme_revoke_tls_key(const char *keyring, const char *key_type,
+			 const char *identity);
+
+/**
+ * nvme_export_tls_key() - Export a TLS key
+ * @key_data:	Raw data of the key
+ * @key_len:	Length of @key_data
+ *
+ * Returns @key_data in the PSK Interchange format as defined in section
+ * 3.6.1.5 of the NVMe TCP Transport specification.
+ *
+ * Return: The string containing the TLS identity or NULL with errno set
+ * on error. It is the responsibility of the caller to free the returned
+ * string.
+ */
+char *nvme_export_tls_key(const unsigned char *key_data, int key_len);
+
+/**
+ * nvme_export_tls_key_versioned() - Export a TLS pre-shared key
+ * @version:	Indicated the representation of the TLS PSK
+ * @hmac:	HMAC algorithm used to transfor the configured PSK
+ *		in a retained PSK
+ * @key_data:	Raw data of the key
+ * @key_len:	Length of @key_data
+ *
+ * Returns @key_data in the PSK Interchange format as defined in section
+ * 3.6.1.5 of the NVMe TCP Transport specification.
+ *
+ * Return: The string containing the TLS identity or NULL with errno set
+ * on error. It is the responsibility of the caller to free the returned
+ * string.
+ */
+char *nvme_export_tls_key_versioned(unsigned char version, unsigned char hmac,
+				    const unsigned char *key_data,
+				    size_t key_len);
+
+/**
+ * nvme_import_tls_key() - Import a TLS key
+ * @encoded_key:	TLS key in PSK interchange format
+ * @key_len:		Length of the resulting key data
+ * @hmac:		HMAC algorithm
+ *
+ * Imports @key_data in the PSK Interchange format as defined in section
+ * 3.6.1.5 of the NVMe TCP Transport specification.
+ *
+ * Return: The raw data of the PSK or NULL with errno set on error. It is
+ * the responsibility of the caller to free the returned string.
+ */
+unsigned char *nvme_import_tls_key(const char *encoded_key, int *key_len,
+				   unsigned int *hmac);
+
+/**
+ * nvme_import_tls_key_versioned() - Import a TLS key
+ * @encoded_key:	TLS key in PSK interchange format
+ * @version:		Indicated the representation of the TLS PSK
+ * @hmac:		HMAC algorithm used to transfor the configured
+ *			PSK in a retained PSK
+ * @key_len:		Length of the resulting key data
+ *
+ * Imports @key_data in the PSK Interchange format as defined in section
+ * 3.6.1.5 of the NVMe TCP Transport specification.
+ *
+ * Return: The raw data of the PSK or NULL with errno set on error. It is
+ * the responsibility of the caller to free the returned string.
+ */
+unsigned char *nvme_import_tls_key_versioned(const char *encoded_key,
+					     unsigned char *version,
+					     unsigned char *hmac,
+					     size_t *key_len);
+/**
+ * nvme_submit_passthru - Low level ioctl wrapper for passthru commands
+ * @fd:		File descriptor of the nvme device
+ * @ioctl_cmd:	IOCTL command id
+ * @cmd:	Passhtru command
+ * @result:	Optional field to return the result
+ *
+ * This is a low level library function which should not be used directly. It is
+ * exposed as weak symbol so that the user application is able to provide their own
+ * implementation of this function with additional debugging or logging code.
+ *
+ * Return: The value from the ioctl system call (see ioctl documentation)
+ */
+__attribute__((weak))
+int nvme_submit_passthru(int fd, unsigned long ioctl_cmd,
+			 struct nvme_passthru_cmd *cmd, __u32 *result);
+
+/**
+ * nvme_submit_passthru64 - Low level ioctl wrapper for passthru commands
+ * @fd:		File descriptor of the nvme device
+ * @ioctl_cmd:	IOCTL command id
+ * @cmd:	Passhtru command
+ * @result:	Optional field to return the result
+ *
+ * This is a low level library function which should not be used directly. It is
+ * exposed as weak symbol so that the user application is able to provide their own
+ * implementation of this function with additional debugging or logging code.
+ *
+ * Return: The value from the ioctl system call (see ioctl documentation)
+ */
+__attribute__((weak))
+int nvme_submit_passthru64(int fd, unsigned long ioctl_cmd,
+			   struct nvme_passthru_cmd64 *cmd,
+			   __u64 *result);
 
 #endif /* _LIBNVME_LINUX_H */

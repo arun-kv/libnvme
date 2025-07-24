@@ -309,6 +309,22 @@ static int __add_bool_argument(char **argstr, char *tok, bool arg)
 	return 0;
 }
 
+static int __add_hex_argument(char **argstr, char *tok, int arg, bool allow_zero)
+{
+	char *nstr;
+
+	if (arg < 0 || (!arg && !allow_zero))
+		return 0;
+	if (asprintf(&nstr, "%s,%s=0x%08x", *argstr, tok, arg) < 0) {
+		errno = ENOMEM;
+		return -1;
+	}
+	free(*argstr);
+	*argstr = nstr;
+
+	return 0;
+}
+
 static int __add_int_argument(char **argstr, char *tok, int arg, bool allow_zero)
 {
 	char *nstr;
@@ -363,7 +379,7 @@ static int __nvmf_supported_options(nvme_root_t r);
 	!__nvmf_supported_options(r) && (r)->options->tok;		\
 })
 
-#define add_bool_argument(o, argstr, tok, arg)				\
+#define add_bool_argument(r, argstr, tok, arg)				\
 ({									\
 	int ret;							\
 	if (nvmf_check_option(r, tok)) {				\
@@ -379,7 +395,24 @@ static int __nvmf_supported_options(nvme_root_t r);
 	ret;								\
 })
 
-#define add_int_argument(o, argstr, tok, arg, allow_zero) \
+#define add_hex_argument(r, argstr, tok, arg, allow_zero)		\
+({									\
+	int ret;							\
+	if (nvmf_check_option(r, tok)) {				\
+		ret = __add_hex_argument(argstr,			\
+					stringify(tok),			\
+					arg,				\
+					allow_zero);			\
+	} else {							\
+		nvme_msg(r, LOG_DEBUG,					\
+			 "option \"%s\" ignored\n",			\
+			 stringify(tok));				\
+		ret = 0;						\
+	}								\
+	ret;								\
+})
+
+#define add_int_argument(r, argstr, tok, arg, allow_zero)		\
 ({									\
 	int ret;							\
 	if (nvmf_check_option(r, tok)) {				\
@@ -396,7 +429,7 @@ static int __nvmf_supported_options(nvme_root_t r);
 	ret;								\
 })
 
-#define add_int_or_minus_one_argument(o, argstr, tok, arg)		\
+#define add_int_or_minus_one_argument(r, argstr, tok, arg)		\
 ({									\
 	int ret;							\
 	if (nvmf_check_option(r, tok)) {				\
@@ -552,6 +585,9 @@ static int build_options(nvme_host_t h, nvme_ctrl_t c, char **argstr)
 	const char *hostnqn, *hostid, *hostkey, *ctrlkey;
 	bool discover = false, discovery_nqn = false;
 	nvme_root_t r = h->r;
+	long keyring_id = 0;
+	long key_id = 0;
+	int ret;
 
 	if (!transport) {
 		nvme_msg(h->r, LOG_ERR, "need a transport (-t) argument\n");
@@ -573,19 +609,39 @@ static int build_options(nvme_host_t h, nvme_ctrl_t c, char **argstr)
 		errno = ENOMEM;
 		return -1;
 	}
+
 	if (!strcmp(nvme_ctrl_get_subsysnqn(c), NVME_DISC_SUBSYS_NAME)) {
 		nvme_ctrl_set_discovery_ctrl(c, true);
 		nvme_ctrl_set_unique_discovery_ctrl(c, false);
 		discovery_nqn = true;
 	}
+
 	if (nvme_ctrl_is_discovery_ctrl(c))
 		discover = true;
+
 	hostnqn = nvme_host_get_hostnqn(h);
 	hostid = nvme_host_get_hostid(h);
 	hostkey = nvme_host_get_dhchap_key(h);
 	if (!hostkey)
 		hostkey = nvme_ctrl_get_dhchap_host_key(c);
+
 	ctrlkey = nvme_ctrl_get_dhchap_key(c);
+
+	if (cfg->tls) {
+		ret = __nvme_import_keys_from_config(h, c, &keyring_id, &key_id);
+		if (ret) {
+			errno = -ret;
+			return -1;
+		}
+
+		if (key_id == 0) {
+			if (cfg->tls_configured_key)
+				key_id = cfg->tls_configured_key;
+			else
+				key_id = cfg->tls_key;
+		}
+	}
+
 	if (add_argument(r, argstr, transport, transport) ||
 	    add_argument(r, argstr, traddr,
 			 nvme_ctrl_get_traddr(c)) ||
@@ -627,9 +683,9 @@ static int build_options(nvme_host_t h, nvme_ctrl_t c, char **argstr)
 			      cfg->fast_io_fail_tmo, false)) ||
 	    (strcmp(transport, "loop") &&
 	     add_int_argument(r, argstr, tos, cfg->tos, true)) ||
-	    add_int_argument(r, argstr, keyring, cfg->keyring, false) ||
+	    add_hex_argument(r, argstr, keyring, keyring_id, false) ||
 	    (!strcmp(transport, "tcp") &&
-	     add_int_argument(r, argstr, tls_key, cfg->tls_key, false)) ||
+	     add_hex_argument(r, argstr, tls_key, key_id, false)) ||
 	    add_bool_argument(r, argstr, duplicate_connect,
 			      cfg->duplicate_connect) ||
 	    add_bool_argument(r, argstr, disable_sqflow,
@@ -760,7 +816,7 @@ static int __nvmf_add_ctrl(nvme_root_t r, const char *argstr)
 		 (int)strcspn(argstr,"\n"), argstr);
 	ret = write(fd, argstr, len);
 	if (ret != len) {
-		nvme_msg(r, LOG_NOTICE, "Failed to write to %s: %s\n",
+		nvme_msg(r, LOG_INFO, "Failed to write to %s: %s\n",
 			 nvmf_dev, strerror(errno));
 		switch (errno) {
 		case EALREADY:
@@ -777,6 +833,8 @@ static int __nvmf_add_ctrl(nvme_root_t r, const char *argstr)
 			return -ENVME_CONNECT_CONNREFUSED;
 		case EADDRNOTAVAIL:
 			return -ENVME_CONNECT_ADDRNOTAVAIL;
+		case ENOKEY:
+			return -ENVME_CONNECT_NOKEY;
 		default:
 			return -ENVME_CONNECT_WRITE;
 		}
@@ -864,6 +922,15 @@ int nvmf_add_ctrl(nvme_host_t h, nvme_ctrl_t c,
 			key = nvme_ctrl_get_dhchap_key(fc);
 			if (key)
 				nvme_ctrl_set_dhchap_key(c, key);
+			key = nvme_ctrl_get_keyring(fc);
+			if (key)
+				nvme_ctrl_set_keyring(c, key);
+			key = nvme_ctrl_get_tls_key_identity(fc);
+			if (key)
+				nvme_ctrl_set_tls_key_identity(c, key);
+			key = nvme_ctrl_get_tls_key(fc);
+			if (key)
+				nvme_ctrl_set_tls_key(c, key);
 		}
 
 	}
@@ -914,6 +981,24 @@ int nvmf_add_ctrl(nvme_host_t h, nvme_ctrl_t c,
 	nvme_msg(h->r, LOG_INFO, "nvme%d: %s connected\n", ret,
 		 nvme_ctrl_get_subsysnqn(c));
 	return nvme_init_ctrl(h, c, ret);
+}
+
+int nvmf_connect_ctrl(nvme_ctrl_t c)
+{
+	_cleanup_free_ char *argstr = NULL;
+	int ret;
+
+	ret = build_options(c->s->h, c, &argstr);
+	if (ret)
+		return ret;
+
+	ret = __nvmf_add_ctrl(c->s->h->r, argstr);
+	if (ret < 0) {
+		errno = -ret;
+		return -1;
+	}
+
+	return 0;
 }
 
 nvme_ctrl_t nvmf_connect_disc_entry(nvme_host_t h,
@@ -1186,29 +1271,12 @@ struct nvmf_discovery_log *nvmf_get_discovery_wargs(struct nvme_get_discovery_ar
 	return log;
 }
 
-#define PATH_UUID_IBM	"/proc/device-tree/ibm,partition-uuid"
-
-static char *uuid_ibm_filename(void)
-{
-	char *basepath = getenv("LIBNVME_SYSFS_PATH");
-	char *str;
-
-	if (!basepath)
-		return strdup(PATH_UUID_IBM);
-
-	if (!asprintf(&str, "%s" PATH_UUID_IBM, basepath))
-		return NULL;
-
-	return str;
-}
-
 static int uuid_from_device_tree(char *system_uuid)
 {
-	_cleanup_free_ char *filename = uuid_ibm_filename();
 	_cleanup_fd_ int f = -1;
 	ssize_t len;
 
-	f = open(filename, O_RDONLY);
+	f = open(nvme_uuid_ibm_filename(), O_RDONLY);
 	if (f < 0)
 		return -ENXIO;
 
@@ -1218,22 +1286,6 @@ static int uuid_from_device_tree(char *system_uuid)
 		return -ENXIO;
 
 	return strlen(system_uuid) ? 0 : -ENXIO;
-}
-
-#define PATH_DMI_ENTRIES       "/sys/firmware/dmi/entries"
-
-static char *dmi_entries_dir(void)
-{
-	char *basepath = getenv("LIBNVME_SYSFS_PATH");
-	char *str;
-
-	if (!basepath)
-		return strdup(PATH_DMI_ENTRIES);
-
-	if (!asprintf(&str, "%s" PATH_DMI_ENTRIES, basepath))
-		return NULL;
-
-	return str;
 }
 
 /*
@@ -1264,7 +1316,7 @@ static bool is_dmi_uuid_valid(const char *buf, size_t len)
 static int uuid_from_dmi_entries(char *system_uuid)
 {
 	_cleanup_dir_ DIR *d = NULL;
-	_cleanup_free_ char *entries_dir = dmi_entries_dir();
+	const char *entries_dir = nvme_dmi_entries_dir();
 	int f;
 	struct dirent *de;
 	char buf[512] = {0};
@@ -1297,6 +1349,8 @@ static int uuid_from_dmi_entries(char *system_uuid)
 			continue;
 		len = read(f, buf, 512);
 		close(f);
+		if (len <= 0)
+			continue;
 
 		if (!is_dmi_uuid_valid(buf, len))
 			continue;
@@ -1373,27 +1427,42 @@ static int uuid_from_dmi(char *system_uuid)
 	return ret;
 }
 
-char *nvmf_hostnqn_generate()
+char *nvmf_hostid_generate()
 {
-	char *hostnqn;
 	int ret;
 	char uuid_str[NVME_UUID_LEN_STRING];
 	unsigned char uuid[NVME_UUID_LEN];
 
 	ret = uuid_from_dmi(uuid_str);
-	if (ret < 0) {
+	if (ret < 0)
 		ret = uuid_from_device_tree(uuid_str);
-	}
 	if (ret < 0) {
 		if (nvme_uuid_random(uuid) < 0)
 			memset(uuid, 0, NVME_UUID_LEN);
 		nvme_uuid_to_string(uuid, uuid_str);
 	}
 
-	if (asprintf(&hostnqn, "nqn.2014-08.org.nvmexpress:uuid:%s", uuid_str) < 0)
-		return NULL;
+	return strdup(uuid_str);
+}
 
-	return hostnqn;
+char *nvmf_hostnqn_generate_from_hostid(char *hostid)
+{
+	char *hid = NULL;
+	char *hostnqn;
+	int ret;
+
+	if (!hostid)
+		hostid = hid = nvmf_hostid_generate();
+
+	ret = asprintf(&hostnqn, "nqn.2014-08.org.nvmexpress:uuid:%s", hostid);
+	free(hid);
+
+	return (ret < 0) ? NULL : hostnqn;
+}
+
+char *nvmf_hostnqn_generate()
+{
+	return nvmf_hostnqn_generate_from_hostid(NULL);
 }
 
 static char *nvmf_read_file(const char *f, int len)
@@ -1418,8 +1487,11 @@ char *nvmf_hostnqn_from_file()
 {
 	char *hostnqn = getenv("LIBNVME_HOSTNQN");
 
-	if (hostnqn)
+	if (hostnqn) {
+		if (!strcmp(hostnqn, ""))
+			return NULL;
 		return strdup(hostnqn);
+	}
 
 	return nvmf_read_file(NVMF_HOSTNQN_FILE, NVMF_NQN_SIZE);
 }
@@ -1428,8 +1500,11 @@ char *nvmf_hostid_from_file()
 {
 	char *hostid = getenv("LIBNVME_HOSTID");
 
-	if (hostid)
+	if (hostid) {
+		if (!strcmp(hostid, ""))
+			return NULL;
 		return strdup(hostid);
+	}
 
 	return nvmf_read_file(NVMF_HOSTID_FILE, NVMF_HOSTID_SIZE);
 }
@@ -1733,4 +1808,149 @@ int nvmf_register_ctrl(nvme_ctrl_t c, enum nvmf_dim_tas tas, __u32 *result)
 	 * as the registration address.
 	 */
 	return nvmf_dim(c, tas, NVMF_TRTYPE_TCP, nvme_get_adrfam(c), "", NULL, result);
+}
+
+#define IS_XDIGIT(c) ((c >= '0' && c <= '9') || \
+		      (c >= 'A' && c <= 'F') || \
+		      (c >= 'a' && c <= 'f'))
+#define XDIGIT_VAL(c) ((c >= '0' && c <= '9') ? c - '0' : ( \
+		       (c >= 'A' && c <= 'F') ? c - 'A' + 10 : c - 'a' + 10))
+
+/* returns newly allocated string */
+static char *unescape_uri(const char *str, int len)
+{
+	char *dst;
+	int l;
+	int i, j;
+
+	l = len > 0 ? len : strlen(str);
+	dst = malloc(l + 1);
+	for (i = 0, j = 0; i < l; i++, j++) {
+		if (str[i] == '%' && i + 2 < l &&
+		    IS_XDIGIT(str[i + 1]) && IS_XDIGIT(str[i + 2])) {
+			dst[j] = (XDIGIT_VAL(str[i + 1]) << 4) +
+				  XDIGIT_VAL(str[i + 2]);
+			i += 2;
+		} else
+			dst[j] = str[i];
+	}
+	dst[j] = '\0';
+	return dst;
+}
+
+struct nvme_fabrics_uri *nvme_parse_uri(const char *str)
+{
+	struct nvme_fabrics_uri *uri;
+	_cleanup_free_ char *scheme = NULL;
+	_cleanup_free_ char *authority = NULL;
+	_cleanup_free_ char *path = NULL;
+	_cleanup_free_ char *h = NULL;
+	const char *host;
+	int i;
+
+	/* As defined in Boot Specification rev. 1.0:
+	 *
+	 * section 1.5.7: NVMe-oF URI Format
+	 *  nvme+tcp://192.168.1.1:4420/
+	 *  nvme+tcp://[FE80::1010]:4420/
+	 *
+	 * section 3.1.2.5.3: DHCP Root-Path - a hierarchical NVMe-oF URI Format
+	 *  NVME<+PROTOCOL>://<SERVERNAME/IP>[:TRANSPORT PORT]/<SUBSYS NQN>/<NID>
+	 * or
+	 *  NVME<+PROTOCOL>://<DISCOVERY CONTROLLER ADDRESS>[:DISCOVERY-
+	 *  -CONTROLLER PORT]/NQN.2014-08.ORG.NVMEXPRESS.DISCOVERY/<NID>
+	 */
+
+	uri = calloc(1, sizeof(struct nvme_fabrics_uri));
+	if (!uri)
+		return NULL;
+
+	if (sscanf(str, "%m[^:/]://%m[^/?#]%ms",
+		   &scheme, &authority, &path) < 2) {
+		nvme_free_uri(uri);
+		errno = EINVAL;
+		return NULL;
+	}
+
+	if (sscanf(scheme, "%m[^+]+%ms",
+		   &uri->scheme, &uri->protocol) < 1) {
+		nvme_free_uri(uri);
+		errno = EINVAL;
+		return NULL;
+	}
+
+	/* split userinfo */
+	host = strrchr(authority, '@');
+	if (host) {
+		host++;
+		uri->userinfo = unescape_uri(authority, host - authority);
+	} else
+		host = authority;
+
+	/* try matching IPv6 address first */
+	if (sscanf(host, "[%m[^]]]:%d",
+		   &uri->host, &uri->port) < 1) {
+		/* treat it as IPv4/hostname */
+		if (sscanf(host, "%m[^:]:%d",
+			   &h, &uri->port) < 1) {
+			nvme_free_uri(uri);
+			errno = EINVAL;
+			return NULL;
+		}
+		uri->host = unescape_uri(h, 0);
+	}
+
+	/* split path into elements */
+	if (path) {
+		char *e, *elem;
+
+		/* separate the fragment */
+		e = strrchr(path, '#');
+		if (e) {
+			uri->fragment = unescape_uri(e + 1, 0);
+			*e = '\0';
+		}
+		/* separate the query string */
+		e = strrchr(path, '?');
+		if (e) {
+			uri->query = unescape_uri(e + 1, 0);
+			*e = '\0';
+		}
+
+		/* count elements first */
+		for (i = 0, e = path; *e; e++)
+			if (*e == '/' && *(e + 1) != '/')
+				i++;
+		uri->path_segments = calloc(i + 2, sizeof(char *));
+
+		i = 0;
+		elem = strtok_r(path, "/", &e);
+		if (elem)
+			uri->path_segments[i++] = unescape_uri(elem, 0);
+		while (elem && strlen(elem)) {
+			elem = strtok_r(NULL, "/", &e);
+			if (elem)
+				uri->path_segments[i++] = unescape_uri(elem, 0);
+		}
+	}
+
+	return uri;
+}
+
+void nvme_free_uri(struct nvme_fabrics_uri *uri)
+{
+	char **s;
+
+	if (!uri)
+		return;
+	free(uri->scheme);
+	free(uri->protocol);
+	free(uri->userinfo);
+	free(uri->host);
+	for (s = uri->path_segments; s && *s; s++)
+		free(*s);
+	free(uri->path_segments);
+	free(uri->query);
+	free(uri->fragment);
+	free(uri);
 }

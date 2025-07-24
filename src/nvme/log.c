@@ -26,13 +26,18 @@
 #define LOG_CLOCK CLOCK_MONOTONIC
 #endif
 
-static nvme_root_t root;
+static struct nvme_log def_log = {
+	.fd = STDERR_FILENO,
+	.level = DEFAULT_LOGLEVEL,
+	.pid = false,
+	.timestamp = false,
+};
 
 void __attribute__((format(printf, 4, 5)))
-__nvme_msg(nvme_root_t r, int lvl,
+__nvme_msg(nvme_root_t r, int level,
 	   const char *func, const char *format, ...)
 {
-	FILE *fp = stderr;
+	struct nvme_log *l;
 	va_list ap;
 	char pidbuf[16];
 	char timebuf[32];
@@ -50,16 +55,15 @@ __nvme_msg(nvme_root_t r, int lvl,
 	_cleanup_free_ char *message = NULL;
 	int idx = 0;
 
-	if (!r)
-		r = root;
-
 	if (r)
-		fp = r->fp;
+		l = &r->log;
+	else
+		l = &def_log;
 
-	if (r && lvl > r->log_level)
+	if (level > l->level)
 		return;
 
-	if (r && r->log_timestamp) {
+	if (l->timestamp) {
 		struct timespec now;
 
 		clock_gettime(LOG_CLOCK, &now);
@@ -69,7 +73,7 @@ __nvme_msg(nvme_root_t r, int lvl,
 	} else
 		*timebuf = '\0';
 
-	if (r && r->log_pid) {
+	if (l->pid) {
 		snprintf(pidbuf, sizeof(pidbuf), "%ld", (long)getpid());
 		idx |= 1 << 1;
 	} else
@@ -87,19 +91,56 @@ __nvme_msg(nvme_root_t r, int lvl,
 		message = NULL;
 	va_end(ap);
 
-	fprintf(fp, "%s%s",
+	dprintf(l->fd, "%s%s",
 		header ? header : "<error>",
 		message ? message : "<error>");
 }
 
 void nvme_init_logging(nvme_root_t r, int lvl, bool log_pid, bool log_tstamp)
 {
-	r->log_level = lvl;
-	r->log_pid = log_pid;
-	r->log_timestamp = log_tstamp;
+	r->log.level = lvl;
+	r->log.pid = log_pid;
+	r->log.timestamp = log_tstamp;
+}
+
+int nvme_get_logging_level(nvme_root_t r, bool *log_pid, bool *log_tstamp)
+{
+	struct nvme_log *l;
+
+	if (r)
+		l = &r->log;
+	else
+		l = &def_log;
+
+	if (log_pid)
+		*log_pid = l->pid;
+	if (log_tstamp)
+		*log_tstamp = l->timestamp;
+	return l->level;
+}
+
+void nvme_init_default_logging(FILE *fp, int level, bool log_pid, bool log_tstamp)
+{
+	def_log.fd = fileno(fp);
+	def_log.level = level;
+	def_log.pid = log_pid;
+	def_log.timestamp = log_tstamp;
 }
 
 void nvme_set_root(nvme_root_t r)
 {
-	root = r;
+	def_log.fd = r->log.fd;
+	def_log.level = r->log.level;
+	def_log.pid = r->log.pid;
+	def_log.timestamp = r->log.timestamp;
+}
+
+void nvme_set_debug(bool debug)
+{
+	def_log.level = debug ? LOG_DEBUG : DEFAULT_LOGLEVEL;
+}
+
+bool nvme_get_debug(void)
+{
+	return def_log.level == LOG_DEBUG;
 }

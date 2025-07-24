@@ -17,8 +17,8 @@
 #include <sys/types.h>
 #include <netinet/in.h>
 
-#include "ioctl.h"
-#include "util.h"
+#include <nvme/ioctl.h>
+#include <nvme/util.h>
 
 /**
  * DOC: tree.h
@@ -27,6 +27,7 @@
  */
 
 typedef struct nvme_ns *nvme_ns_t;
+typedef struct nvme_ns_head *nvme_ns_head_t;
 typedef struct nvme_path *nvme_path_t;
 typedef struct nvme_ctrl *nvme_ctrl_t;
 typedef struct nvme_subsystem *nvme_subsystem_t;
@@ -61,6 +62,14 @@ void nvme_root_set_application(nvme_root_t r, const char *a);
  * Returns the managing application string for @r or NULL if not set.
  */
 const char *nvme_root_get_application(nvme_root_t r);
+
+/**
+ * nvme_root_skip_namespaces - Skip namespace scanning
+ * @r:	&nvme_root_t object
+ *
+ * Sets a flag to skip namespaces during scanning.
+ */
+void nvme_root_skip_namespaces(nvme_root_t r);
 
 /**
  * nvme_root_release_fds - Close all opened file descriptors in the tree
@@ -161,12 +170,47 @@ bool nvme_host_is_pdc_enabled(nvme_host_t h, bool fallback);
  * nvme_default_host() - Initializes the default host
  * @r:	&nvme_root_t object
  *
- * Initializes the default host object based on the values in
- * /etc/nvme/hostnqn and /etc/nvme/hostid and attaches it to @r.
+ * Initializes the default host object based on the hostnqn/hostid
+ * values returned by nvme_host_get_ids() and attaches it to @r.
  *
  * Return: &nvme_host_t object
  */
 nvme_host_t nvme_default_host(nvme_root_t r);
+
+/**
+ * nvme_host_get_ids - Retrieve host ids from various sources
+ *
+ * @r:			&nvme_root_t object
+ * @hostnqn_arg:	Input hostnqn (command line) argument
+ * @hostid_arg:		Input hostid (command line) argument
+ * @hostnqn:		Output hostnqn
+ * @hostid:		Output hostid
+ *
+ * nvme_host_get_ids figures out which hostnqn/hostid is to be used.
+ * There are several sources where this information can be retrieved.
+ *
+ * The order is:
+ *
+ *  - Start with informartion from DMI or device-tree
+ *  - Override hostnqn and hostid from /etc/nvme files
+ *  - Override hostnqn or hostid with values from JSON
+ *    configuration file. The first host entry in the file is
+ *    considered the default host.
+ *  - Override hostnqn or hostid with values from the command line
+ *    (@hostnqn_arg, @hostid_arg).
+ *
+ *  If the IDs are still NULL after the lookup algorithm, the function
+ *  will generate random IDs.
+ *
+ *  The function also verifies that hostnqn and hostid matches. The Linux
+ *  NVMe implementation expects a 1:1 matching between the IDs.
+ *
+ *  Return: 0 on success (@hostnqn and @hostid contain valid strings
+ *  which the caller needs to free), -1 otherwise and errno is set.
+ */
+int nvme_host_get_ids(nvme_root_t r,
+		      char *hostnqn_arg, char *hostid_arg,
+		      char **hostnqn, char **hostid);
 
 /**
  * nvme_first_subsystem() - Start subsystem iterator
@@ -824,6 +868,22 @@ const char *nvme_path_get_sysfs_dir(nvme_path_t p);
 const char *nvme_path_get_ana_state(nvme_path_t p);
 
 /**
+ * nvme_path_get_numa_nodes() - NUMA nodes of an nvme_path_t object
+ * @p : &nvme_path_t object
+ *
+ * Return: NUMA nodes associated to @p
+ */
+const char *nvme_path_get_numa_nodes(nvme_path_t p);
+
+/**
+ * nvme_path_get_queue_depth() - Queue depth of an nvme_path_t object
+ * @p: &nvme_path_t object
+ *
+ * Return: Queue depth of @p
+ */
+int nvme_path_get_queue_depth(nvme_path_t p);
+
+/**
  * nvme_path_get_ctrl() - Parent controller of an nvme_path_t object
  * @p:	&nvme_path_t object
  *
@@ -1026,6 +1086,14 @@ const char *nvme_ctrl_get_host_iface(nvme_ctrl_t c);
 const char *nvme_ctrl_get_dhchap_host_key(nvme_ctrl_t c);
 
 /**
+ *  nvme_ctrl_get_cntlid() - Controller id
+ *  @c:	Controller to be checked
+ *
+ *  Return : Controller id of @c
+ */
+const char *nvme_ctrl_get_cntlid(nvme_ctrl_t c);
+
+/**
  * nvme_ctrl_set_dhchap_host_key() - Set host key
  * @c:		Host for which the key should be set
  * @key:	DH-HMAC-CHAP Key to set or NULL to clear existing key
@@ -1041,11 +1109,64 @@ void nvme_ctrl_set_dhchap_host_key(nvme_ctrl_t c, const char *key);
 const char *nvme_ctrl_get_dhchap_key(nvme_ctrl_t c);
 
 /**
+ * nvme_ns_head_get_sysfs_dir() - sysfs dir of namespave head
+ * @head: namespace head instance
+ *
+ * Returns: sysfs directory name of @head
+ */
+const char *nvme_ns_head_get_sysfs_dir(nvme_ns_head_t head);
+
+/**
  * nvme_ctrl_set_dhchap_key() - Set controller key
  * @c:		Controller for which the key should be set
  * @key:	DH-HMAC-CHAP Key to set or NULL to clear existing key
  */
 void nvme_ctrl_set_dhchap_key(nvme_ctrl_t c, const char *key);
+
+/**
+ * nvme_ctrl_get_keyring() - Return keyring
+ * @c:	Controller to be used for the lookup
+ *
+ * Return: Keyring or NULL if not set
+ */
+const char *nvme_ctrl_get_keyring(nvme_ctrl_t c);
+
+/**
+ * nvme_ctrl_set_keyring() - Set keyring
+ * @c:		Controller for which the keyring should be set
+ * @keyring:	Keyring name
+ */
+void nvme_ctrl_set_keyring(nvme_ctrl_t c, const char *keyring);
+
+/**
+ * nvme_ctrl_get_tls_key_identity() - Return Derive TLS Identity
+ * @c:		Controller to be used for the lookup
+ *
+ * Return: Derive TLS Identity or NULL if not set
+ */
+const char *nvme_ctrl_get_tls_key_identity(nvme_ctrl_t c);
+
+/**
+ * nvme_ctrl_set_tls_key_identity() - Set Derive TLS Identity
+ * @c:		Controller for which the key should be set
+ * @identity:	Derive TLS identity or NULL to clear existing key
+ */
+void nvme_ctrl_set_tls_key_identity(nvme_ctrl_t c, const char *identity);
+
+/**
+ * nvme_ctrl_get_tls_key() - Return Derive TLS PSK
+ * @c:		Controller to be used for the lookup
+ *
+ * Return: Key in PSK interchange format or NULL if not set
+ */
+const char *nvme_ctrl_get_tls_key(nvme_ctrl_t c);
+
+/**
+ * nvme_ctrl_set_tls_key() - Set Derive TLS PSK
+ * @c:		Controller for which the key should be set
+ * @key:	Key in interchange format or NULL to clear existing key
+ */
+void nvme_ctrl_set_tls_key(nvme_ctrl_t c, const char *key);
 
 /**
  * nvme_ctrl_get_config() - Fabrics configuration of a controller
@@ -1251,6 +1372,30 @@ void nvme_subsystem_set_application(nvme_subsystem_t s, const char *a);
 const char *nvme_subsystem_get_iopolicy(nvme_subsystem_t s);
 
 /**
+ * nvme_subsystem_get_model() - Return the model of subsystem
+ * @s:	nvme_subsystem_t object
+ *
+ * Return: Model of the current subsystem
+ */
+const char *nvme_subsystem_get_model(nvme_subsystem_t s);
+
+/**
+ * nvme_subsystem_get_serial() - Return the serial number of subsystem
+ * @s:	nvme_subsystem_t object
+ *
+ * Return: Serial number of the current subsystem
+ */
+const char *nvme_subsystem_get_serial(nvme_subsystem_t s);
+
+/**
+ * nvme_subsystem_get_fw_rev() - Return the firmware rev of subsystem
+ * @s:	nvme_subsystem_t object
+ *
+ * Return: Firmware revision of the current subsystem
+ */
+const char *nvme_subsystem_get_fw_rev(nvme_subsystem_t s);
+
+/**
  * nvme_scan_topology() - Scan NVMe topology and apply filter
  * @r:	    nvme_root_t object
  * @f:	    filter to apply
@@ -1259,7 +1404,7 @@ const char *nvme_subsystem_get_iopolicy(nvme_subsystem_t s);
  * Scans the NVMe topology and filters out the resulting elements
  * by applying @f.
  *
- * Return: Number of elements scanned
+ * Returns: 0 on success, -1 on failure with errno set.
  */
 int nvme_scan_topology(nvme_root_t r, nvme_scan_filter_t f, void *f_args);
 

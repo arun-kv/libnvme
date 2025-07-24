@@ -68,26 +68,16 @@ static void json_update_attributes(nvme_ctrl_t c,
 		if (!strcmp("discovery", key_str) &&
 		    !nvme_ctrl_is_discovery_ctrl(c))
 			nvme_ctrl_set_discovery_ctrl(c, true);
-		/*
-		 * The JSON configuration holds the keyring description
-		 * which needs to be converted into the keyring serial number.
-		 */
-		if (!strcmp("keyring", key_str) && cfg->keyring == 0) {
-			long keyring;
-
-			keyring = nvme_lookup_keyring(json_object_get_string(val_obj));
-			if (keyring) {
-				cfg->keyring = keyring;
-				nvme_set_keyring(cfg->keyring);
-			}
+		if (!strcmp("keyring", key_str))
+			nvme_ctrl_set_keyring(c,
+				json_object_get_string(val_obj));
+		if (!strcmp("tls_key_identity", key_str)) {
+			nvme_ctrl_set_tls_key_identity(c,
+				json_object_get_string(val_obj));
 		}
-		if (!strcmp("tls_key", key_str) && cfg->tls_key == 0) {
-			long key;
-
-			key = nvme_lookup_key("psk",
-					      json_object_get_string(val_obj));
-			if (key)
-				cfg->tls_key = key;
+		if (!strcmp("tls_key", key_str)) {
+			nvme_ctrl_set_tls_key(c,
+				json_object_get_string(val_obj));
 		}
 	}
 }
@@ -126,6 +116,19 @@ static void json_parse_port(nvme_subsystem_t s, struct json_object *port_obj)
 	attr_obj = json_object_object_get(port_obj, "dhchap_ctrl_key");
 	if (attr_obj)
 		nvme_ctrl_set_dhchap_key(c, json_object_get_string(attr_obj));
+	attr_obj = json_object_object_get(port_obj, "keyring");
+	if (attr_obj)
+		nvme_ctrl_set_keyring(c, json_object_get_string(attr_obj));
+	attr_obj = json_object_object_get(port_obj, "tls_key_identity");
+	if (attr_obj) {
+		nvme_ctrl_set_tls_key_identity(c,
+			json_object_get_string(attr_obj));
+	}
+	attr_obj = json_object_object_get(port_obj, "tls_key");
+	if (attr_obj) {
+		nvme_ctrl_set_tls_key(c,
+			json_object_get_string(attr_obj));
+	}
 }
 
 static void json_parse_subsys(nvme_host_t h, struct json_object *subsys_obj)
@@ -284,6 +287,9 @@ static void json_update_port(struct json_object *ctrl_array, nvme_ctrl_t c)
 	const char *transport, *value;
 
 	transport = nvme_ctrl_get_transport(c);
+	if (!strcmp(transport, "pcie"))
+		return;
+
 	json_object_object_add(port_obj, "transport",
 			       json_object_new_string(transport));
 	value = nvme_ctrl_get_traddr(c);
@@ -310,6 +316,19 @@ static void json_update_port(struct json_object *ctrl_array, nvme_ctrl_t c)
 	if (value)
 		json_object_object_add(port_obj, "dhchap_ctrl_key",
 				       json_object_new_string(value));
+	JSON_BOOL_OPTION(cfg, port_obj, tls);
+	value = nvme_ctrl_get_keyring(c);
+	if (value)
+		json_object_object_add(port_obj, "keyring",
+				       json_object_new_string(value));
+	value = nvme_ctrl_get_tls_key_identity(c);
+	if (value)
+		json_object_object_add(port_obj, "tls_key_identity",
+				       json_object_new_string(value));
+	value = nvme_ctrl_get_tls_key(c);
+	if (value)
+		json_object_object_add(port_obj, "tls_key",
+				       json_object_new_string(value));
 	JSON_INT_OPTION(cfg, port_obj, nr_io_queues, 0);
 	JSON_INT_OPTION(cfg, port_obj, nr_write_queues, 0);
 	JSON_INT_OPTION(cfg, port_obj, nr_poll_queues, 0);
@@ -326,7 +345,6 @@ static void json_update_port(struct json_object *ctrl_array, nvme_ctrl_t c)
 	JSON_BOOL_OPTION(cfg, port_obj, disable_sqflow);
 	JSON_BOOL_OPTION(cfg, port_obj, hdr_digest);
 	JSON_BOOL_OPTION(cfg, port_obj, data_digest);
-	JSON_BOOL_OPTION(cfg, port_obj, tls);
 	JSON_BOOL_OPTION(cfg, port_obj, concat);
 	if (nvme_ctrl_is_persistent(c))
 		json_object_object_add(port_obj, "persistent",
@@ -334,27 +352,6 @@ static void json_update_port(struct json_object *ctrl_array, nvme_ctrl_t c)
 	if (nvme_ctrl_is_discovery_ctrl(c))
 		json_object_object_add(port_obj, "discovery",
 				       json_object_new_boolean(true));
-	/*
-	 * Store the keyring description in the JSON config file.
-	 */
-	if (cfg->keyring) {
-		_cleanup_free_ char *desc =
-			nvme_describe_key_serial(cfg->keyring);
-
-		if (desc) {
-			json_object_object_add(port_obj, "keyring",
-					       json_object_new_string(desc));
-		}
-	}
-	if (cfg->tls_key) {
-		_cleanup_free_ char *desc =
-			nvme_describe_key_serial(cfg->tls_key);
-
-		if (desc) {
-			json_object_object_add(port_obj, "tls_key",
-					       json_object_new_string(desc));
-		}
-	}
 
 	json_object_array_add(ctrl_array, port_obj);
 }
@@ -381,11 +378,13 @@ static void json_update_subsys(struct json_object *subsys_array,
 	nvme_subsystem_for_each_ctrl(s, c) {
 		json_update_port(port_array, c);
 	}
-	if (json_object_array_length(port_array))
+	if (json_object_array_length(port_array)) {
 		json_object_object_add(subsys_obj, "ports", port_array);
-	else
+		json_object_array_add(subsys_array, subsys_obj);
+	} else {
 		json_object_put(port_array);
-	json_object_array_add(subsys_array, subsys_obj);
+		json_object_put(subsys_obj);
+	}
 }
 
 int json_update_config(nvme_root_t r, const char *config_file)
@@ -425,19 +424,24 @@ int json_update_config(nvme_root_t r, const char *config_file)
 		nvme_for_each_subsystem(h, s) {
 			json_update_subsys(subsys_array, s);
 		}
-		if (json_object_array_length(subsys_array))
+		if (json_object_array_length(subsys_array)) {
 			json_object_object_add(host_obj, "subsystems",
-						    subsys_array);
-		else
+					       subsys_array);
+			json_object_array_add(json_root, host_obj);
+		} else {
 			json_object_put(subsys_array);
-		json_object_array_add(json_root, host_obj);
+			json_object_put(host_obj);
+		}
 	}
 	if (!config_file) {
-		ret = json_object_to_fd(1, json_root, JSON_C_TO_STRING_PRETTY);
+		ret = json_object_to_fd(1, json_root,
+					JSON_C_TO_STRING_PRETTY |
+					JSON_C_TO_STRING_NOSLASHESCAPE);
 		printf("\n");
 	} else
 		ret = json_object_to_file_ext(config_file, json_root,
-					      JSON_C_TO_STRING_PRETTY);
+					      JSON_C_TO_STRING_PRETTY |
+					      JSON_C_TO_STRING_NOSLASHESCAPE);
 	if (ret < 0) {
 		nvme_msg(r, LOG_ERR, "Failed to write to %s, %s\n",
 			 config_file ? "stdout" : config_file,
@@ -503,7 +507,22 @@ static void json_dump_ctrl(struct json_object *ctrl_array, nvme_ctrl_t c)
 	JSON_BOOL_OPTION(cfg, ctrl_obj, disable_sqflow);
 	JSON_BOOL_OPTION(cfg, ctrl_obj, hdr_digest);
 	JSON_BOOL_OPTION(cfg, ctrl_obj, data_digest);
-	JSON_BOOL_OPTION(cfg, ctrl_obj, tls);
+	if (!strcmp(transport, "tcp")) {
+		JSON_BOOL_OPTION(cfg, ctrl_obj, tls);
+
+		value = nvme_ctrl_get_keyring(c);
+		if (value)
+			json_object_object_add(ctrl_obj, "keyring",
+					       json_object_new_string(value));
+		value = nvme_ctrl_get_tls_key_identity(c);
+		if (value)
+			json_object_object_add(ctrl_obj, "tls_key_identity",
+					       json_object_new_string(value));
+		value = nvme_ctrl_get_tls_key(c);
+		if (value)
+			json_object_object_add(ctrl_obj, "tls_key",
+					       json_object_new_string(value));
+	}
 	JSON_BOOL_OPTION(cfg, ctrl_obj, concat);
 	if (nvme_ctrl_is_persistent(c))
 		json_object_object_add(ctrl_obj, "persistent",
@@ -514,25 +533,97 @@ static void json_dump_ctrl(struct json_object *ctrl_array, nvme_ctrl_t c)
 	json_object_array_add(ctrl_array, ctrl_obj);
 }
 
+static unsigned int json_dump_subsys_multipath(nvme_subsystem_t s,
+				struct json_object *ns_array)
+{
+	nvme_ns_t n;
+	nvme_path_t p;
+	unsigned int i = 0;
+
+	nvme_subsystem_for_each_ns(s, n) {
+		struct json_object *ns_obj;
+		struct json_object *path_array;
+
+		ns_obj = json_object_new_object();
+		json_object_object_add(ns_obj, "nsid",
+				json_object_new_int(nvme_ns_get_nsid(n)));
+		json_object_object_add(ns_obj, "name",
+				json_object_new_string(nvme_ns_get_name(n)));
+
+		path_array = json_object_new_array();
+		nvme_namespace_for_each_path(n, p) {
+			struct json_object *path_obj;
+			struct json_object *ctrl_array;
+			nvme_ctrl_t c;
+
+			path_obj = json_object_new_object();
+			json_object_object_add(path_obj, "path",
+				json_object_new_string(nvme_path_get_name(p)));
+			json_object_object_add(path_obj, "ANAState",
+				json_object_new_string(nvme_path_get_ana_state(p)));
+			json_object_object_add(path_obj, "NUMANodes",
+				json_object_new_string(nvme_path_get_numa_nodes(p)));
+			json_object_object_add(path_obj, "qdepth",
+				json_object_new_int(nvme_path_get_queue_depth(p)));
+
+			c = nvme_path_get_ctrl(p);
+			ctrl_array = json_object_new_array();
+			json_dump_ctrl(ctrl_array, c);
+			json_object_object_add(path_obj, "controller", ctrl_array);
+			json_object_array_add(path_array, path_obj);
+		}
+		json_object_object_add(ns_obj, "paths", path_array);
+		json_object_array_add(ns_array, ns_obj);
+		i++;
+	}
+	return i;
+}
+
+static void json_dump_subsys_non_multipath(nvme_subsystem_t s,
+		struct json_object *ns_array)
+{
+	nvme_ctrl_t c;
+	nvme_ns_t n;
+
+	nvme_subsystem_for_each_ctrl(s, c) {
+		nvme_ctrl_for_each_ns(c, n) {
+			struct json_object *ctrl_array;
+			struct json_object *ns_obj;
+
+			ns_obj = json_object_new_object();
+			json_object_object_add(ns_obj, "nsid",
+				json_object_new_int(nvme_ns_get_nsid(n)));
+			json_object_object_add(ns_obj, "name",
+				json_object_new_string(nvme_ns_get_name(n)));
+
+			ctrl_array = json_object_new_array();
+			json_dump_ctrl(ctrl_array, c);
+			json_object_object_add(ns_obj, "controller", ctrl_array);
+
+			json_object_array_add(ns_array, ns_obj);
+		}
+	}
+}
+
 static void json_dump_subsys(struct json_object *subsys_array,
 			       nvme_subsystem_t s)
 {
-	nvme_ctrl_t c;
 	struct json_object *subsys_obj = json_object_new_object();
-	struct json_object *ctrl_array;
+	struct json_object *ns_array;
 
 	json_object_object_add(subsys_obj, "name",
 			       json_object_new_string(nvme_subsystem_get_name(s)));
 	json_object_object_add(subsys_obj, "nqn",
 			       json_object_new_string(nvme_subsystem_get_nqn(s)));
-	ctrl_array = json_object_new_array();
-	nvme_subsystem_for_each_ctrl(s, c) {
-		json_dump_ctrl(ctrl_array, c);
-	}
-	if (json_object_array_length(ctrl_array))
-		json_object_object_add(subsys_obj, "controllers", ctrl_array);
+
+	ns_array = json_object_new_array();
+	if (!json_dump_subsys_multipath(s, ns_array))
+		json_dump_subsys_non_multipath(s, ns_array);
+
+	if (json_object_array_length(ns_array))
+		json_object_object_add(subsys_obj, "namespaces", ns_array);
 	else
-		json_object_put(ctrl_array);
+		json_object_put(ns_array);
 	json_object_array_add(subsys_array, subsys_obj);
 }
 
@@ -576,7 +667,9 @@ int json_dump_tree(nvme_root_t r)
 	}
 	json_object_object_add(json_root, "hosts", host_array);
 
-	ret = json_object_to_fd(fileno(r->fp), json_root, JSON_C_TO_STRING_PRETTY);
+	ret = json_object_to_fd(r->log.fd, json_root,
+				JSON_C_TO_STRING_PRETTY |
+				JSON_C_TO_STRING_NOSLASHESCAPE);
 	if (ret < 0) {
 		nvme_msg(r, LOG_ERR, "Failed to write, %s\n",
 			 json_util_get_last_err());

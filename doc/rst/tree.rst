@@ -53,6 +53,20 @@ Sets the managing application string for **r**.
 Returns the managing application string for **r** or NULL if not set.
 
 
+.. c:function:: void nvme_root_skip_namespaces (nvme_root_t r)
+
+   Skip namespace scanning
+
+**Parameters**
+
+``nvme_root_t r``
+  :c:type:`nvme_root_t` object
+
+**Description**
+
+Sets a flag to skip namespaces during scanning.
+
+
 .. c:function:: void nvme_root_release_fds (nvme_root_t r)
 
    Close all opened file descriptors in the tree
@@ -229,12 +243,60 @@ true if PDC is enabled for **h**, else false
 
 **Description**
 
-Initializes the default host object based on the values in
-/etc/nvme/hostnqn and /etc/nvme/hostid and attaches it to **r**.
+Initializes the default host object based on the hostnqn/hostid
+values returned by nvme_host_get_ids() and attaches it to **r**.
 
 **Return**
 
 :c:type:`nvme_host_t` object
+
+
+.. c:function:: int nvme_host_get_ids (nvme_root_t r, char *hostnqn_arg, char *hostid_arg, char **hostnqn, char **hostid)
+
+   Retrieve host ids from various sources
+
+**Parameters**
+
+``nvme_root_t r``
+  :c:type:`nvme_root_t` object
+
+``char *hostnqn_arg``
+  Input hostnqn (command line) argument
+
+``char *hostid_arg``
+  Input hostid (command line) argument
+
+``char **hostnqn``
+  Output hostnqn
+
+``char **hostid``
+  Output hostid
+
+**Description**
+
+nvme_host_get_ids figures out which hostnqn/hostid is to be used.
+There are several sources where this information can be retrieved.
+
+The order is:
+
+ - Start with informartion from DMI or device-tree
+ - Override hostnqn and hostid from /etc/nvme files
+ - Override hostnqn or hostid with values from JSON
+   configuration file. The first host entry in the file is
+   considered the default host.
+ - Override hostnqn or hostid with values from the command line
+   (**hostnqn_arg**, **hostid_arg**).
+
+ If the IDs are still NULL after the lookup algorithm, the function
+ will generate random IDs.
+
+ The function also verifies that hostnqn and hostid matches. The Linux
+ NVMe implementation expects a 1:1 matching between the IDs.
+
+**Return**
+
+0 on success (**hostnqn** and **hostid** contain valid strings
+ which the caller needs to free), -1 otherwise and errno is set.
 
 
 .. c:function:: nvme_subsystem_t nvme_first_subsystem (nvme_host_t h)
@@ -1729,6 +1791,20 @@ Host interface name of **c** (if present)
 DH-HMAC-CHAP host key or NULL if not set
 
 
+.. c:function:: const char * nvme_ctrl_get_cntlid (nvme_ctrl_t c)
+
+   Controller id
+
+**Parameters**
+
+``nvme_ctrl_t c``
+  Controller to be checked
+
+**Return**
+
+Controller id of **c**
+
+
 .. c:function:: void nvme_ctrl_set_dhchap_host_key (nvme_ctrl_t c, const char *key)
 
    Set host key
@@ -1767,6 +1843,87 @@ DH-HMAC-CHAP controller key or NULL if not set
 
 ``const char *key``
   DH-HMAC-CHAP Key to set or NULL to clear existing key
+
+
+.. c:function:: const char * nvme_ctrl_get_keyring (nvme_ctrl_t c)
+
+   Return keyring
+
+**Parameters**
+
+``nvme_ctrl_t c``
+  Controller to be used for the lookup
+
+**Return**
+
+Keyring or NULL if not set
+
+
+.. c:function:: void nvme_ctrl_set_keyring (nvme_ctrl_t c, const char *keyring)
+
+   Set keyring
+
+**Parameters**
+
+``nvme_ctrl_t c``
+  Controller for which the keyring should be set
+
+``const char *keyring``
+  Keyring name
+
+
+.. c:function:: const char * nvme_ctrl_get_tls_key_identity (nvme_ctrl_t c)
+
+   Return Derive TLS Identity
+
+**Parameters**
+
+``nvme_ctrl_t c``
+  Controller to be used for the lookup
+
+**Return**
+
+Derive TLS Identity or NULL if not set
+
+
+.. c:function:: void nvme_ctrl_set_tls_key_identity (nvme_ctrl_t c, const char *identity)
+
+   Set Derive TLS Identity
+
+**Parameters**
+
+``nvme_ctrl_t c``
+  Controller for which the key should be set
+
+``const char *identity``
+  Derive TLS identity or NULL to clear existing key
+
+
+.. c:function:: const char * nvme_ctrl_get_tls_key (nvme_ctrl_t c)
+
+   Return Derive TLS PSK
+
+**Parameters**
+
+``nvme_ctrl_t c``
+  Controller to be used for the lookup
+
+**Return**
+
+Key in PSK interchange format or NULL if not set
+
+
+.. c:function:: void nvme_ctrl_set_tls_key (nvme_ctrl_t c, const char *key)
+
+   Set Derive TLS PSK
+
+**Parameters**
+
+``nvme_ctrl_t c``
+  Controller for which the key should be set
+
+``const char *key``
+  Key in interchange format or NULL to clear existing key
 
 
 .. c:function:: struct nvme_fabrics_config * nvme_ctrl_get_config (nvme_ctrl_t c)
@@ -2128,6 +2285,48 @@ Sets the managing application string for **s**.
 **Return**
 
 IO policy used by current subsystem
+
+
+.. c:function:: const char * nvme_subsystem_get_model (nvme_subsystem_t s)
+
+   Return the model of subsystem
+
+**Parameters**
+
+``nvme_subsystem_t s``
+  nvme_subsystem_t object
+
+**Return**
+
+Model of the current subsystem
+
+
+.. c:function:: const char * nvme_subsystem_get_serial (nvme_subsystem_t s)
+
+   Return the serial number of subsystem
+
+**Parameters**
+
+``nvme_subsystem_t s``
+  nvme_subsystem_t object
+
+**Return**
+
+Serial number of the current subsystem
+
+
+.. c:function:: const char * nvme_subsystem_get_fw_rev (nvme_subsystem_t s)
+
+   Return the firmware rev of subsystem
+
+**Parameters**
+
+``nvme_subsystem_t s``
+  nvme_subsystem_t object
+
+**Return**
+
+Firmware revision of the current subsystem
 
 
 .. c:function:: int nvme_scan_topology (nvme_root_t r, nvme_scan_filter_t f, void *f_args)

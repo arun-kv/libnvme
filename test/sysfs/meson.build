@@ -5,25 +5,32 @@
 #
 # Authors: Daniel Wagner <dwagner@suse.de>
 
+diff = find_program('diff', required : false)
+if diff.found()
+    tree_dump = executable(
+        'test-tree-dump',
+        ['tree-dump.c'],
+        dependencies: libnvme_dep,
+        include_directories: [incdir],
+    )
 
-sysfs = executable(
-    'test-sysfs',
-    ['sysfs.c'],
-    dependencies: libnvme_dep,
-    include_directories: [incdir, internal_incdir]
-)
+    tree_data = [
+        'tree-pcie',
+    ]
 
-sysfs_files= [
-    'nvme-sysfs-tw-carbon-6.8.0-rc1+'
-]
+    tree_diff = find_program('tree-diff.sh')
 
-setup = find_program('setup.sh')
-
-foreach t_file : sysfs_files
-    r = run_command(setup, files('data'/t_file + '.tar.xz'), meson.current_build_dir(), check: true)
-    i = r.stdout().strip()
-    e0 = 'LIBNVME_SYSFS_PATH=' + i
-    e1 = 'LIBNVME_HOSTNQN=nqn.2014-08.org.nvmexpress:uuid:ce4fee3e-c02c-11ee-8442-830d068a36c6'
-    e2 = 'LIBNVME_HOSTID=ce4fee3e-c02c-11ee-8442-830d068a36c6'
-    test('sysfs', sysfs, args : [ i, t_file + '.out', files('data'/t_file + '.out') ], env : [ e0, e1, e2 ])
-endforeach
+    foreach t_file : tree_data
+        test(
+            t_file,
+            tree_diff,
+            args : [
+                meson.current_build_dir(),
+                tree_dump.full_path(),
+                files('data'/t_file + '.tar.xz'),
+                files('data'/t_file + '.out'),
+            ],
+            depends : tree_dump,
+        )
+    endforeach
+endif

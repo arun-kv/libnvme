@@ -10,10 +10,12 @@
 #ifndef _LIBNVME_IOCTL_H
 #define _LIBNVME_IOCTL_H
 
+#include <errno.h>
 #include <stddef.h>
 #include <sys/ioctl.h>
-#include "types.h"
-#include "api-types.h"
+
+#include <nvme/types.h>
+#include <nvme/api-types.h>
 
 /*
  * We can not always count on the kernel UAPI being installed. Use the same
@@ -39,6 +41,11 @@
  * avoids having to check the MDTS value of the controller.
  */
 #define NVME_LOG_PAGE_PDU_SIZE 4096
+
+/*
+ * should not exceed CAP.MQES, 16 is rational for most ssd
+ */
+#define NVME_URING_ENTRIES 16
 
 /**
  * struct nvme_passthru_cmd - nvme passthrough command structure
@@ -180,6 +187,8 @@ struct nvme_uring_cmd {
 /* io_uring async commands: */
 #define NVME_URING_CMD_IO	_IOWR('N', 0x80, struct nvme_uring_cmd)
 #define NVME_URING_CMD_IO_VEC	_IOWR('N', 0x81, struct nvme_uring_cmd)
+#define NVME_URING_CMD_ADMIN	_IOWR('N', 0x82, struct nvme_uring_cmd)
+#define NVME_URING_CMD_ADMIN_VEC _IOWR('N', 0x83, struct nvme_uring_cmd)
 
 #endif /* _UAPI_LINUX_NVME_IOCTL_H */
 
@@ -198,6 +207,127 @@ struct nvme_uring_cmd {
 	size_t p = (sizeof(align) - (t % sizeof(align))) % sizeof(align);	\
 	t + p;									\
 })
+
+enum nvme_cmd_dword_fields {
+	NVME_DEVICE_SELF_TEST_CDW10_STC_SHIFT			= 0,
+	NVME_DEVICE_SELF_TEST_CDW10_STC_MASK			= 0xf,
+	NVME_DIRECTIVE_CDW11_DOPER_SHIFT			= 0,
+	NVME_DIRECTIVE_CDW11_DTYPE_SHIFT			= 8,
+	NVME_DIRECTIVE_CDW11_DPSEC_SHIFT			= 16,
+	NVME_DIRECTIVE_CDW11_DOPER_MASK				= 0xff,
+	NVME_DIRECTIVE_CDW11_DTYPE_MASK				= 0xff,
+	NVME_DIRECTIVE_CDW11_DPSEC_MASK				= 0xffff,
+	NVME_DIRECTIVE_SEND_IDENTIFY_CDW12_ENDIR_SHIFT		= 0,
+	NVME_DIRECTIVE_SEND_IDENTIFY_CDW12_DTYPE_SHIFT		= 1,
+	NVME_DIRECTIVE_SEND_IDENTIFY_CDW12_ENDIR_MASK		= 0x1,
+	NVME_DIRECTIVE_SEND_IDENTIFY_CDW12_DTYPE_MASK		= 0x1,
+	NVME_FW_COMMIT_CDW10_FS_SHIFT				= 0,
+	NVME_FW_COMMIT_CDW10_CA_SHIFT				= 3,
+	NVME_FW_COMMIT_CDW10_BPID_SHIFT				= 31,
+	NVME_FW_COMMIT_CDW10_FS_MASK				= 0x7,
+	NVME_FW_COMMIT_CDW10_CA_MASK				= 0x7,
+	NVME_FW_COMMIT_CDW10_BPID_MASK				= 0x1,
+	NVME_GET_FEATURES_CDW10_SEL_SHIFT			= 8,
+	NVME_GET_FEATURES_CDW10_SEL_MASK			= 0x7,
+	NVME_SET_FEATURES_CDW10_SAVE_SHIFT			= 31,
+	NVME_SET_FEATURES_CDW10_SAVE_MASK			= 0x1,
+	NVME_FEATURES_CDW10_FID_SHIFT				= 0,
+	NVME_FEATURES_CDW14_UUID_SHIFT				= 0,
+	NVME_FEATURES_CDW10_FID_MASK				= 0xff,
+	NVME_FEATURES_CDW14_UUID_MASK				= 0x7f,
+	NVME_LOG_CDW10_LID_SHIFT				= 0,
+	NVME_LOG_CDW10_LSP_SHIFT				= 8,
+	NVME_LOG_CDW10_RAE_SHIFT				= 15,
+	NVME_LOG_CDW10_NUMDL_SHIFT				= 16,
+	NVME_LOG_CDW11_NUMDU_SHIFT				= 0,
+	NVME_LOG_CDW11_LSI_SHIFT				= 16,
+	NVME_LOG_CDW14_UUID_SHIFT				= 0,
+	NVME_LOG_CDW14_CSI_SHIFT				= 24,
+	NVME_LOG_CDW14_OT_SHIFT					= 23,
+	NVME_LOG_CDW10_LID_MASK					= 0xff,
+	NVME_LOG_CDW10_LSP_MASK					= 0x7f,
+	NVME_LOG_CDW10_RAE_MASK					= 0x1,
+	NVME_LOG_CDW10_NUMDL_MASK				= 0xffff,
+	NVME_LOG_CDW11_NUMDU_MASK				= 0xffff,
+	NVME_LOG_CDW11_LSI_MASK					= 0xffff,
+	NVME_LOG_CDW14_UUID_MASK				= 0x7f,
+	NVME_LOG_CDW14_CSI_MASK					= 0xff,
+	NVME_LOG_CDW14_OT_MASK					= 0x1,
+	NVME_IDENTIFY_CDW10_CNS_SHIFT				= 0,
+	NVME_IDENTIFY_CDW10_CNTID_SHIFT				= 16,
+	NVME_IDENTIFY_CDW11_CNSSPECID_SHIFT			= 0,
+	NVME_IDENTIFY_CDW14_UUID_SHIFT				= 0,
+	NVME_IDENTIFY_CDW11_CSI_SHIFT				= 24,
+	NVME_IDENTIFY_CDW10_CNS_MASK				= 0xff,
+	NVME_IDENTIFY_CDW10_CNTID_MASK				= 0xffff,
+	NVME_IDENTIFY_CDW11_CNSSPECID_MASK			= 0xffff,
+	NVME_IDENTIFY_CDW14_UUID_MASK				= 0x7f,
+	NVME_IDENTIFY_CDW11_CSI_MASK				= 0xff,
+	NVME_NAMESPACE_ATTACH_CDW10_SEL_SHIFT			= 0,
+	NVME_NAMESPACE_ATTACH_CDW10_SEL_MASK			= 0xf,
+	NVME_NAMESPACE_MGMT_CDW10_SEL_SHIFT			= 0,
+	NVME_NAMESPACE_MGMT_CDW10_SEL_MASK			= 0xf,
+	NVME_NAMESPACE_MGMT_CDW11_CSI_SHIFT			= 24,
+	NVME_NAMESPACE_MGMT_CDW11_CSI_MASK			= 0xff,
+	NVME_VIRT_MGMT_CDW10_ACT_SHIFT				= 0,
+	NVME_VIRT_MGMT_CDW10_RT_SHIFT				= 8,
+	NVME_VIRT_MGMT_CDW10_CNTLID_SHIFT			= 16,
+	NVME_VIRT_MGMT_CDW11_NR_SHIFT				= 0,
+	NVME_VIRT_MGMT_CDW10_ACT_MASK				= 0xf,
+	NVME_VIRT_MGMT_CDW10_RT_MASK				= 0x7,
+	NVME_VIRT_MGMT_CDW10_CNTLID_MASK			= 0xffff,
+	NVME_VIRT_MGMT_CDW11_NR_MASK				= 0xffff,
+	NVME_FORMAT_CDW10_LBAF_SHIFT				= 0,
+	NVME_FORMAT_CDW10_MSET_SHIFT				= 4,
+	NVME_FORMAT_CDW10_PI_SHIFT				= 5,
+	NVME_FORMAT_CDW10_PIL_SHIFT				= 8,
+	NVME_FORMAT_CDW10_SES_SHIFT				= 9,
+	NVME_FORMAT_CDW10_LBAFU_SHIFT				= 12,
+	NVME_FORMAT_CDW10_LBAF_MASK				= 0xf,
+	NVME_FORMAT_CDW10_MSET_MASK				= 0x1,
+	NVME_FORMAT_CDW10_PI_MASK				= 0x7,
+	NVME_FORMAT_CDW10_PIL_MASK				= 0x1,
+	NVME_FORMAT_CDW10_SES_MASK				= 0x7,
+	NVME_FORMAT_CDW10_LBAFU_MASK				= 0x3,
+	NVME_SANITIZE_CDW10_SANACT_SHIFT			= 0,
+	NVME_SANITIZE_CDW10_AUSE_SHIFT				= 3,
+	NVME_SANITIZE_CDW10_OWPASS_SHIFT			= 4,
+	NVME_SANITIZE_CDW10_OIPBP_SHIFT				= 8,
+	NVME_SANITIZE_CDW10_NODAS_SHIFT				= 9,
+	NVME_SANITIZE_CDW10_EMVS_SHIFT				= 10,
+	NVME_SANITIZE_CDW10_SANACT_MASK				= 0x7,
+	NVME_SANITIZE_CDW10_AUSE_MASK				= 0x1,
+	NVME_SANITIZE_CDW10_OWPASS_MASK				= 0xf,
+	NVME_SANITIZE_CDW10_OIPBP_MASK				= 0x1,
+	NVME_SANITIZE_CDW10_NODAS_MASK				= 0x1,
+	NVME_SANITIZE_CDW10_EMVS_MASK				= 0x1,
+	NVME_SECURITY_NSSF_SHIFT				= 0,
+	NVME_SECURITY_SPSP0_SHIFT				= 8,
+	NVME_SECURITY_SPSP1_SHIFT				= 16,
+	NVME_SECURITY_SECP_SHIFT				= 24,
+	NVME_SECURITY_NSSF_MASK					= 0xff,
+	NVME_SECURITY_SPSP0_MASK				= 0xff,
+	NVME_SECURITY_SPSP1_MASK				= 0xff,
+	NVME_SECURITY_SECP_MASK					= 0xffff,
+	NVME_GET_LBA_STATUS_CDW13_RL_SHIFT			= 0,
+	NVME_GET_LBA_STATUS_CDW13_ATYPE_SHIFT			= 24,
+	NVME_GET_LBA_STATUS_CDW13_RL_MASK			= 0xffff,
+	NVME_GET_LBA_STATUS_CDW13_ATYPE_MASK			= 0xff,
+	NVME_ZNS_MGMT_SEND_ZSASO_SHIFT				= 9,
+	NVME_ZNS_MGMT_SEND_ZSASO_MASK				= 0x1,
+	NVME_ZNS_MGMT_SEND_SEL_SHIFT				= 8,
+	NVME_ZNS_MGMT_SEND_SEL_MASK				= 0x1,
+	NVME_ZNS_MGMT_SEND_ZSA_SHIFT				= 0,
+	NVME_ZNS_MGMT_SEND_ZSA_MASK				= 0xff,
+	NVME_ZNS_MGMT_RECV_ZRA_SHIFT				= 0,
+	NVME_ZNS_MGMT_RECV_ZRA_MASK				= 0xff,
+	NVME_ZNS_MGMT_RECV_ZRASF_SHIFT				= 8,
+	NVME_ZNS_MGMT_RECV_ZRASF_MASK				= 0xff,
+	NVME_ZNS_MGMT_RECV_ZRAS_FEAT_SHIFT			= 16,
+	NVME_ZNS_MGMT_RECV_ZRAS_FEAT_MASK			= 0x1,
+	NVME_DIM_TAS_SHIFT					= 0,
+	NVME_DIM_TAS_MASK					= 0xF,
+};
 
 /**
  * nvme_submit_admin_passthru64() - Submit a 64-bit nvme passthrough admin
@@ -1242,6 +1372,30 @@ static inline int nvme_get_nsid_log(int fd, bool rae,
 	return nvme_get_log_page(fd, NVME_LOG_PAGE_PDU_SIZE, &args);
 }
 
+static inline int nvme_get_endgid_log(int fd, bool rae, enum nvme_cmd_get_log_lid lid, __u16 endgid,
+				    __u32 len, void *log)
+{
+	struct nvme_get_log_args args = {
+		.lpo = 0,
+		.result = NULL,
+		.log = log,
+		.args_size = sizeof(args),
+		.fd = fd,
+		.timeout = NVME_DEFAULT_IOCTL_TIMEOUT,
+		.lid = lid,
+		.len = len,
+		.nsid = NVME_NSID_NONE,
+		.csi = NVME_CSI_NVM,
+		.lsi = endgid,
+		.lsp = NVME_LOG_LSP_NONE,
+		.uuidx = NVME_LOG_LSP_NONE,
+		.rae = rae,
+		.ot = false,
+	};
+
+	return nvme_get_log_page(fd, NVME_LOG_PAGE_PDU_SIZE, &args);
+}
+
 static inline int nvme_get_log_simple(int fd, enum nvme_cmd_get_log_lid lid,
 				      __u32 len, void *log)
 {
@@ -1405,14 +1559,16 @@ static inline int nvme_get_log_device_self_test(int fd,
 }
 
 /**
- * nvme_get_log_create_telemetry_host() - Create host telemetry log
+ * nvme_get_log_create_telemetry_host_mcda() - Create host telemetry log
  * @fd:		File descriptor of nvme device
+ * @mcda:	Maximum Created Data Area
  * @log:	Userspace address of the log payload
  *
  * Return: The nvme command status if a response was received (see
  * &enum nvme_status_field) or -1 with errno set otherwise.
  */
-static inline int nvme_get_log_create_telemetry_host(int fd,
+static inline int nvme_get_log_create_telemetry_host_mcda(int fd,
+			enum nvme_telemetry_da mcda,
 			struct nvme_telemetry_log *log)
 {
 	struct nvme_get_log_args args = {
@@ -1427,12 +1583,26 @@ static inline int nvme_get_log_create_telemetry_host(int fd,
 		.nsid = NVME_NSID_NONE,
 		.csi = NVME_CSI_NVM,
 		.lsi = NVME_LOG_LSI_NONE,
-		.lsp = NVME_LOG_TELEM_HOST_LSP_CREATE,
+		.lsp = (__u8)((mcda << 1) | NVME_LOG_TELEM_HOST_LSP_CREATE),
 		.uuidx = NVME_UUID_NONE,
 		.rae = false,
 		.ot = false,
 	};
 	return nvme_get_log_page(fd, NVME_LOG_PAGE_PDU_SIZE, &args);
+}
+
+/**
+ * nvme_get_log_create_telemetry_host() - Create host telemetry log
+ * @fd:		File descriptor of nvme device
+ * @log:	Userspace address of the log payload
+ *
+ * Return: The nvme command status if a response was received (see
+ * &enum nvme_status_field) or -1 with errno set otherwise.
+ */
+static inline int nvme_get_log_create_telemetry_host(int fd,
+			struct nvme_telemetry_log *log)
+{
+	return nvme_get_log_create_telemetry_host_mcda(fd, NVME_TELEMETRY_DA_CTRL_DETERMINE, log);
 }
 
 /**
@@ -1746,7 +1916,7 @@ static inline int nvme_get_log_fdp_events(int fd, __u16 egid, bool host_events, 
  * the asymmetric namespace access information for ANA Groups that contain
  * namespaces that are attached to the controller processing the command.
  *
- * See &struct nvme_ana_rsp_hdr for the definition of the returned structure.
+ * See &struct nvme_ana_log for the definition of the returned structure.
  *
  * Return: The nvme command status if a response was received (see
  * &enum nvme_status_field) or -1 with errno set otherwise.
@@ -1768,7 +1938,7 @@ static inline int nvme_get_log_ana(int fd, enum nvme_log_ana_lsp lsp, bool rae,
 		.lsi = NVME_LOG_LSI_NONE,
 		.lsp = (__u8)lsp,
 		.uuidx = NVME_UUID_NONE,
-		.rae = false,
+		.rae = rae,
 		.ot = false,
 	};
 	return nvme_get_log_page(fd, NVME_LOG_PAGE_PDU_SIZE, &args);
@@ -1781,17 +1951,40 @@ static inline int nvme_get_log_ana(int fd, enum nvme_log_ana_lsp lsp, bool rae,
  * @len:	The allocated length of the log page
  * @log:	User address to store the ana group log
  *
- * See &struct nvme_ana_group_desc for the definition of the returned structure.
+ * See &struct nvme_ana_log for the definition of the returned structure.
  *
  * Return: The nvme command status if a response was received (see
  * &enum nvme_status_field) or -1 with errno set otherwise.
  */
 static inline int nvme_get_log_ana_groups(int fd, bool rae, __u32 len,
-			    struct nvme_ana_group_desc *log)
+			    struct nvme_ana_log *log)
 {
 	return nvme_get_log_ana(fd, NVME_LOG_ANA_LSP_RGO_GROUPS_ONLY, rae, 0,
 				len, log);
 }
+
+/**
+ * nvme_get_ana_log_atomic() - Retrieve Asymmetric Namespace Access log page atomically
+ * @fd:		File descriptor of nvme device
+ * @rgo:	Whether to retrieve ANA groups only (no NSIDs)
+ * @rae:	Whether to retain asynchronous events
+ * @retries:	The maximum number of times to retry on log page changes
+ * @log:	Pointer to a buffer to receive the ANA log page
+ * @len:	Input: the length of the log page buffer.
+ * 		Output: the actual length of the ANA log page.
+ *
+ * See &struct nvme_ana_log for the definition of the returned structure.
+ *
+ * Return: If successful, returns 0 and sets *len to the actual log page length.
+ * If unsuccessful, returns the nvme command status if a response was received
+ * (see &enum nvme_status_field) or -1 with errno set otherwise.
+ * Sets errno = EINVAL if retries == 0.
+ * Sets errno = EAGAIN if unable to read the log page atomically
+ * because chgcnt changed during each of the retries attempts.
+ * Sets errno = ENOSPC if the full log page does not fit in the provided buffer.
+ */
+int nvme_get_ana_log_atomic(int fd, bool rgo, bool rae, unsigned int retries,
+			    struct nvme_ana_log *log, __u32 *len);
 
 /**
  * nvme_get_log_lba_status() - Retrieve LBA Status
@@ -1828,7 +2021,7 @@ static inline int nvme_get_log_lba_status(int fd, bool rae,
 }
 
 /**
- * nvme_get_log_endurance_grp_evt() - Retrieve Rotational Media Information
+ * nvme_get_log_endurance_grp_evt() - Retrieve Endurance Group Event Aggregate
  * @fd:		File descriptor of nvme device
  * @rae:	Retain asynchronous events
  * @offset:	Offset to the start of the log page
@@ -1929,6 +2122,55 @@ static inline int nvme_get_log_boot_partition(int fd, bool rae,
 }
 
 /**
+ * nvme_get_log_rotational_media_info() - Retrieve Rotational Media Information Log
+ * @fd:		File descriptor of nvme device
+ * @endgid:	Endurance Group Identifier
+ * @len:	The allocated length of the log page
+ * @log:	User address to store the log page
+ *
+ * Return: The nvme command status if a response was received (see
+ * &enum nvme_status_field) or -1 with errno set otherwise
+ */
+static inline int nvme_get_log_rotational_media_info(int fd, __u16 endgid, __u32 len,
+						     struct nvme_rotational_media_info_log *log)
+{
+	return nvme_get_endgid_log(fd, false, NVME_LOG_LID_ROTATIONAL_MEDIA_INFO, endgid, len, log);
+}
+
+/**
+ * nvme_get_log_dispersed_ns_participating_nss() - Retrieve Dispersed Namespace Participating NVM
+ * Subsystems Log
+ * @fd:		File descriptor of nvme device
+ * @nsid:	Namespace Identifier
+ * @len:	The allocated length of the log page
+ * @log:	User address to store the log page
+ *
+ * Return: The nvme command status if a response was received (see
+ * &enum nvme_status_field) or -1 with errno set otherwise
+ */
+static inline int nvme_get_log_dispersed_ns_participating_nss(int fd, __u32 nsid, __u32 len,
+	struct nvme_dispersed_ns_participating_nss_log *log)
+{
+	return nvme_get_nsid_log(fd, false, NVME_LOG_LID_DISPERSED_NS_PARTICIPATING_NSS, nsid, len,
+				 log);
+}
+
+/**
+ * nvme_get_log_mgmt_addr_list() - Retrieve Management Address List Log
+ * @fd:		File descriptor of nvme device
+ * @len:	The allocated length of the log page
+ * @log:	User address to store the log page
+ *
+ * Return: The nvme command status if a response was received (see
+ * &enum nvme_status_field) or -1 with errno set otherwise
+ */
+static inline int nvme_get_log_mgmt_addr_list(int fd, __u32 len,
+					      struct nvme_mgmt_addr_list_log *log)
+{
+	return nvme_get_log_simple(fd, NVME_LOG_LID_MGMT_ADDR_LIST, len, log);
+}
+
+/**
  * nvme_get_log_phy_rx_eom() - Retrieve Physical Interface Receiver Eye Opening Measurement Log
  * @fd:		File descriptor of nvme device
  * @lsp:	Log specific, controls action and measurement quality
@@ -1961,6 +2203,93 @@ static inline int nvme_get_log_phy_rx_eom(int fd, __u8 lsp, __u16 controller,
 		.ot = false,
 	};
 	return nvme_get_log_page(fd, NVME_LOG_PAGE_PDU_SIZE, &args);
+}
+
+/**
+ * nvme_get_log_reachability_groups() - Retrieve Reachability Groups Log
+ * @fd:		File descriptor of nvme device
+ * @rgo:	Return groups only
+ * @rae:	Retain asynchronous events
+ * @len:	The allocated length of the log page
+ * @log:	User address to store the log page
+ *
+ * Return: The nvme command status if a response was received (see
+ * &enum nvme_status_field) or -1 with errno set otherwise
+ */
+static inline int nvme_get_log_reachability_groups(int fd, bool rgo, bool rae, __u32 len,
+						   struct nvme_reachability_groups_log *log)
+{
+	struct nvme_get_log_args args = {
+		.lpo = 0,
+		.result = NULL,
+		.log = log,
+		.args_size = sizeof(args),
+		.fd = fd,
+		.timeout = NVME_DEFAULT_IOCTL_TIMEOUT,
+		.lid = NVME_LOG_LID_REACHABILITY_GROUPS,
+		.len = len,
+		.nsid = NVME_NSID_ALL,
+		.csi = NVME_CSI_NVM,
+		.lsi = NVME_LOG_LSI_NONE,
+		.lsp = rgo,
+		.uuidx = NVME_LOG_LSP_NONE,
+		.rae = rae,
+		.ot = false,
+	};
+
+	return nvme_get_log_page(fd, NVME_LOG_PAGE_PDU_SIZE, &args);
+}
+
+/**
+ * nvme_get_log_reachability_associations() - Retrieve Reachability Associations Log
+ * @fd:		File descriptor of nvme device
+ * @rao:	Return associations only
+ * @rae:	Retain asynchronous events
+ * @len:	The allocated length of the log page
+ * @log:	User address to store the log page
+ *
+ * Return: The nvme command status if a response was received (see
+ * &enum nvme_status_field) or -1 with errno set otherwise
+ */
+static inline int nvme_get_log_reachability_associations(int fd, bool rao, bool rae, __u32 len,
+	struct nvme_reachability_associations_log *log)
+{
+	struct nvme_get_log_args args = {
+		.lpo = 0,
+		.result = NULL,
+		.log = log,
+		.args_size = sizeof(args),
+		.fd = fd,
+		.timeout = NVME_DEFAULT_IOCTL_TIMEOUT,
+		.lid = NVME_LOG_LID_REACHABILITY_ASSOCIATIONS,
+		.len = len,
+		.nsid = NVME_NSID_ALL,
+		.csi = NVME_CSI_NVM,
+		.lsi = NVME_LOG_LSI_NONE,
+		.lsp = rao,
+		.uuidx = NVME_LOG_LSP_NONE,
+		.rae = rae,
+		.ot = false,
+	};
+
+	return nvme_get_log_page(fd, NVME_LOG_PAGE_PDU_SIZE, &args);
+}
+
+/**
+ * nvme_get_log_changed_alloc_ns_list() - Retrieve Changed Allocated Namespace List Log
+ * @fd:		File descriptor of nvme device
+ * @rae:	Retain asynchronous events
+ * @len:	The allocated length of the log page
+ * @log:	User address to store the log page
+ *
+ * Return: The nvme command status if a response was received (see
+ * &enum nvme_status_field) or -1 with errno set otherwise
+ */
+static inline int nvme_get_log_changed_alloc_ns_list(int fd, bool rae, __u32 len,
+						     struct nvme_ns_list *log)
+{
+	return nvme_get_nsid_log(fd, rae, NVME_LOG_LID_CHANGED_ALLOC_NS_LIST, NVME_NSID_ALL, len,
+				 log);
 }
 
 /**
@@ -1998,6 +2327,73 @@ static inline int nvme_get_log_discovery(int fd, bool rae,
 		.ot = false,
 	};
 	return nvme_get_log_page(fd, NVME_LOG_PAGE_PDU_SIZE, &args);
+}
+
+/**
+ * nvme_get_log_host_discover() - Retrieve Host Discovery Log
+ * @fd:		File descriptor of nvme device
+ * @allhoste:	All host entries
+ * @rae:	Retain asynchronous events
+ * @len:	The allocated length of the log page
+ * @log:	User address to store the log page
+ *
+ * Return: The nvme command status if a response was received (see
+ * &enum nvme_status_field) or -1 with errno set otherwise
+ */
+static inline int nvme_get_log_host_discover(int fd, bool allhoste, bool rae, __u32 len,
+					     struct nvme_host_discover_log *log)
+{
+	struct nvme_get_log_args args = {
+		.lpo = 0,
+		.result = NULL,
+		.log = log,
+		.args_size = sizeof(args),
+		.fd = fd,
+		.timeout = NVME_DEFAULT_IOCTL_TIMEOUT,
+		.lid = NVME_LOG_LID_HOST_DISCOVER,
+		.len = len,
+		.nsid = NVME_NSID_ALL,
+		.csi = NVME_CSI_NVM,
+		.lsi = NVME_LOG_LSI_NONE,
+		.lsp = allhoste,
+		.uuidx = NVME_LOG_LSP_NONE,
+		.rae = rae,
+		.ot = false,
+	};
+
+	return nvme_get_log_page(fd, NVME_LOG_PAGE_PDU_SIZE, &args);
+}
+
+/**
+ * nvme_get_log_ave_discover() - Retrieve AVE Discovery Log
+ * @fd:		File descriptor of nvme device
+ * @rae:	Retain asynchronous events
+ * @len:	The allocated length of the log page
+ * @log:	User address to store the log page
+ *
+ * Return: The nvme command status if a response was received (see
+ * &enum nvme_status_field) or -1 with errno set otherwise
+ */
+static inline int nvme_get_log_ave_discover(int fd, bool rae, __u32 len,
+					    struct nvme_ave_discover_log *log)
+{
+	return nvme_get_nsid_log(fd, rae, NVME_LOG_LID_AVE_DISCOVER, NVME_NSID_ALL, len, log);
+}
+
+/**
+ * nvme_get_log_pull_model_ddc_req() - Retrieve Pull Model DDC Request Log
+ * @fd:		File descriptor of nvme device
+ * @rae:	Retain asynchronous events
+ * @len:	The allocated length of the log page
+ * @log:	User address to store the log page
+ *
+ * Return: The nvme command status if a response was received (see
+ * &enum nvme_status_field) or -1 with errno set otherwise
+ */
+static inline int nvme_get_log_pull_model_ddc_req(int fd, bool rae, __u32 len,
+						  struct nvme_pull_model_ddc_req_log *log)
+{
+	return nvme_get_nsid_log(fd, rae, NVME_LOG_LID_PULL_MODEL_DDC_REQ, NVME_NSID_ALL, len, log);
 }
 
 /**
@@ -2171,6 +2567,38 @@ static inline int nvme_get_log_persistent_event(int fd,
 
 int nvme_abort(struct nvme_abort_args *args);
 /**
+ * nvme_get_log_lockdown() - Retrieve lockdown Log
+ * @fd:			File descriptor of nvme device
+ * @cnscp:		Contents and Scope of Command and Feature Identifier Lists
+ * @lockdown_log:	Buffer to store the lockdown log
+ *
+ * Return: The nvme command status if a response was received (see
+ * &enum nvme_status_field) or -1 with errno set otherwise.
+ */
+static inline int nvme_get_log_lockdown(int fd,
+			__u8 cnscp, struct nvme_lockdown_log *lockdown_log)
+{
+	struct nvme_get_log_args args = {
+		.lpo = 0,
+		.result = NULL,
+		.log = lockdown_log,
+		.args_size = sizeof(args),
+		.fd = fd,
+		.timeout = NVME_DEFAULT_IOCTL_TIMEOUT,
+		.lid = NVME_LOG_LID_CMD_AND_FEAT_LOCKDOWN,
+		.len = sizeof(*lockdown_log),
+		.nsid = NVME_NSID_ALL,
+		.csi = NVME_CSI_NVM,
+		.lsi = NVME_LOG_LSI_NONE,
+		.lsp = cnscp,
+		.uuidx = NVME_UUID_NONE,
+		.rae = false,
+		.ot = false,
+	};
+	return nvme_get_log_page(fd, NVME_LOG_PAGE_PDU_SIZE, &args);
+}
+
+/**
  * nvme_set_features() - Set a feature attribute
  * @args:	&struct nvme_set_features_args argument structure
  *
@@ -2210,7 +2638,7 @@ static inline int nvme_set_features_data(int fd, __u8 fid, __u32 nsid,
 		.cdw15 = 0,
 		.data_len = data_len,
 		.save = save,
-		.uuidx = 0,
+		.uuidx = NVME_UUID_NONE,
 		.fid = fid,
 	};
 	return nvme_set_features(&args);
@@ -2295,6 +2723,23 @@ int nvme_set_features_lba_range(int fd, __u32 nsid, __u8 nr_ranges, bool save,
 int nvme_set_features_temp_thresh(int fd, __u16 tmpth, __u8 tmpsel,
 				  enum nvme_feat_tmpthresh_thsel thsel,
 				  bool save, __u32 *result);
+
+/**
+ * nvme_set_features_temp_thresh2() - Set temperature threshold feature
+ * @fd:		File descriptor of nvme device
+ * @tmpth:	Temperature Threshold
+ * @tmpsel:	Threshold Temperature Select
+ * @thsel:	Threshold Type Select
+ * @tmpthh:	Temperature Threshold Hysteresis
+ * @save:	Save value across power states
+ * @result:	The command completion result from CQE dword0
+ *
+ * Return: The nvme command status if a response was received (see
+ * &enum nvme_status_field) or -1 with errno set otherwise.
+ */
+int nvme_set_features_temp_thresh2(int fd, __u16 tmpth, __u8 tmpsel,
+				   enum nvme_feat_tmpthresh_thsel thsel, __u8 tmpthh,
+				   bool save, __u32 *result);
 
 /**
  * nvme_set_features_err_recovery() - Set error recovery feature
@@ -2784,6 +3229,20 @@ int nvme_get_features_temp_thresh(int fd, enum nvme_get_features_sel sel,
 				  __u32 *result);
 
 /**
+ * nvme_get_features_temp_thresh2() - Get temperature threshold feature
+ * @fd:		File descriptor of nvme device
+ * @sel:	Select which type of attribute to return, see &enum nvme_get_features_sel
+ * @tmpsel:	Threshold Temperature Select
+ * @thsel:	Threshold Type Select
+ * @result:	The command completion result from CQE dword0
+ *
+ * Return: The nvme command status if a response was received (see
+ * &enum nvme_status_field) or -1 with errno set otherwise.
+ */
+int nvme_get_features_temp_thresh2(int fd, enum nvme_get_features_sel sel, __u8 tmpsel,
+				   enum nvme_feat_tmpthresh_thsel thsel, __u32 *result);
+
+/**
  * nvme_get_features_err_recovery() - Get error recovery feature
  *
  * Deprecated: doesn't support specifying a NSID.
@@ -3235,6 +3694,39 @@ static inline int nvme_ns_mgmt_create(int fd, struct nvme_id_ns *ns,
 }
 
 /**
+ * nvme_ns_mgmt_delete_timeout() - Delete a non attached namespace with timeout
+ * @fd:		File descriptor of nvme device
+ * @nsid:	Namespace identifier to delete
+ * @timeout:	Override the default timeout to this value in milliseconds;
+ *		set to 0 to use the system default.
+ *
+ * It is recommended that a namespace being deleted is not attached to any
+ * controller. Use the nvme_ns_detach_ctrls() first if the namespace is still
+ * attached.
+ *
+ * Return: The nvme command status if a response was received (see
+ * &enum nvme_status_field) or -1 with errno set otherwise.
+ */
+static inline int nvme_ns_mgmt_delete_timeout(int fd, __u32 nsid, __u32 timeout)
+{
+	struct nvme_ns_mgmt_args args = {
+		.result = NULL,
+		.ns = NULL,
+		.args_size = sizeof(args),
+		.fd = fd,
+		.timeout = timeout,
+		.nsid = nsid,
+		.sel = NVME_NS_MGMT_SEL_DELETE,
+		.csi = 0,
+		.rsvd1 = { 0, },
+		.rsvd2 = NULL,
+		.data = NULL,
+	};
+
+	return nvme_ns_mgmt(&args);
+}
+
+/**
  * nvme_ns_mgmt_delete() - Delete a non attached namespace
  * @fd:		File descriptor of nvme device
  * @nsid:	Namespace identifier to delete
@@ -3248,21 +3740,7 @@ static inline int nvme_ns_mgmt_create(int fd, struct nvme_id_ns *ns,
  */
 static inline int nvme_ns_mgmt_delete(int fd, __u32 nsid)
 {
-	struct nvme_ns_mgmt_args args = {
-		.result = NULL,
-		.ns = NULL,
-		.args_size = sizeof(args),
-		.fd = fd,
-		.timeout = 0,
-		.nsid = nsid,
-		.sel = NVME_NS_MGMT_SEL_DELETE,
-		.csi = 0,
-		.rsvd1 = { 0, },
-		.rsvd2 = NULL,
-		.data = NULL,
-	};
-
-	return nvme_ns_mgmt(&args);
+	return nvme_ns_mgmt_delete_timeout(fd, nsid, 0);
 }
 
 /**
@@ -3566,6 +4044,11 @@ static inline int nvme_directive_recv_stream_status(int fd, __u32 nsid,
 			unsigned int nr_entries,
 			struct nvme_streams_directive_status *id)
 {
+	if (nr_entries > NVME_STREAM_ID_MAX) {
+		errno = EINVAL;
+		return -1;
+	}
+
 	struct nvme_directive_recv_args args = {
 		.result = NULL,
 		.data = id,
@@ -3576,7 +4059,7 @@ static inline int nvme_directive_recv_stream_status(int fd, __u32 nsid,
 		.doper = NVME_DIRECTIVE_RECEIVE_STREAMS_DOPER_STATUS,
 		.dtype = NVME_DIRECTIVE_DTYPE_STREAMS,
 		.cdw12 = 0,
-		.data_len = sizeof(*id),
+		.data_len = (__u32)(sizeof(*id) + nr_entries * sizeof(__le16)),
 		.dspec = 0,
 	};
 
@@ -4050,15 +4533,67 @@ int nvme_zns_append(struct nvme_zns_append_args *args);
 int nvme_dim_send(struct nvme_dim_args *args);
 
 /**
- * nvme_set_debug - Set NVMe command debugging output
- * @debug:	true to enable or false to disable
+ * nvme_lm_cdq() - Controller Data Queue - Controller Data Queue command
+ * @args:	&struct nvme_lm_cdq_args argument structure
+ *
+ * Return: The nvme command status if a response was received (see
+ * &enum nvme_status_field) or -1 with errno set otherwise.)
  */
-void nvme_set_debug(bool debug);
+int nvme_lm_cdq(struct nvme_lm_cdq_args *args);
 
 /**
- * nvme_get_debug - Get NVMe command debugging output
+ * nvme_lm_track_send() - Track Send command
+ * @args:	&struct nvme_lm_track_send_args argument structure
  *
- * Return: false if disabled or true if enabled.
+ * Return: The nvme command status if a response was received (see
+ * &enum nvme_status_field) or -1 with errno set otherwise.
  */
-bool nvme_get_debug(void);
+int nvme_lm_track_send(struct nvme_lm_track_send_args *args);
+
+/**
+ * nvme_lm_migration_send() - Migration Send command
+ * @args:	&struct nvme_lm_migration_send_args argument structure
+ *
+ * Return: The nvme command status if a response was received (see
+ * &enum nvme_status_field) or -1 with errno set otherwise.
+ */
+int nvme_lm_migration_send(struct nvme_lm_migration_send_args *args);
+
+/**
+ * nvme_lm_migration_recv - Migration Receive command
+ * @args:	&struct nvme_lm_migration_rev_args argument structure
+ *
+ * Return: The nvme command status if a response was received (see
+ * &enum nvme_status_field) or -1 with errno set otherwise.
+ */
+int nvme_lm_migration_recv(struct nvme_lm_migration_recv_args *args);
+
+/**
+ * nvme_lm_set_features_ctrl_data_queue - Set Controller Datea Queue feature
+ * @fd:		File descriptor of nvme device
+ * @cdqid:	Controller Data Queue ID (CDQID)
+ * @hp:		Head Pointer
+ * @tpt:	Tail Pointer Trigger
+ * @etpt:	Enable Tail Pointer Trigger
+ * @result:	The command completions result from CQE dword0
+ *
+ * Return: The nvme command status if a response was received (see
+ * &enum nvme_status_field) or -1 with errno set otherwise.
+ */
+int nvme_lm_set_features_ctrl_data_queue(int fd, __u16 cdqid, __u32 hp, __u32 tpt, bool etpt,
+					 __u32 *result);
+
+/**
+ * nvme_lm_get_features_ctrl_data_queue - Get Controller Data Queue feature
+ * @fd:		File descriptor of nvme device
+ * @cdqid:	Controller Data Queue ID (CDQID)
+ * @data:	Get Controller Data Queue feature data
+ * @result:	The command completions result from CQE dword0
+ *
+ * Return: The nvme command status if a response was received (see
+ * &enum nvme_status_field) or -1 with errno set otherwise.
+ */
+int nvme_lm_get_features_ctrl_data_queue(int fd, __u16 cdqid,
+					 struct nvme_lm_ctrl_data_queue_fid_data *data,
+					 __u32 *result);
 #endif /* _LIBNVME_IOCTL_H */

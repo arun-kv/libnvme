@@ -23,6 +23,17 @@ if cxx_available
         dependencies: libnvme_dep,
         include_directories: [incdir, internal_incdir]
     )
+
+    test('cpp-dump', cpp)
+
+    misc = executable(
+        'test-misc',
+        ['misc.cc'],
+        dependencies: libnvme_dep,
+        include_directories: [incdir, internal_incdir]
+    )
+    test('cpp-misc', misc)
+
 endif
 
 register = executable(
@@ -66,6 +77,15 @@ uuid = executable(
 
 test('uuid', uuid)
 
+uriparser = executable(
+    'test-uriparser',
+    ['uriparser.c'],
+    dependencies: libnvme_dep,
+    include_directories: [incdir, internal_incdir]
+)
+
+test('uriparser', uriparser)
+
 if conf.get('HAVE_NETDB')
     mock_ifaddrs = library(
         'mock-ifaddrs',
@@ -95,9 +115,19 @@ if conf.get('HAVE_NETDB')
     test('util', test_util)
 endif
 
+psk = executable(
+    'test-psk',
+    ['psk.c'],
+    dependencies: libnvme_dep,
+    include_directories: [incdir, internal_incdir]
+)
+
+test('psk', psk)
+
 subdir('ioctl')
 subdir('nbft')
 
 if json_c_dep.found()
-  subdir('sysfs')
+    subdir('sysfs')
+    subdir('config')
 endif

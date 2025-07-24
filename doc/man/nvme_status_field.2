@@ -1,4 +1,4 @@
-.TH "libnvme" 9 "enum nvme_status_field" "February 2024" "API Manual" LINUX
+.TH "libnvme" 9 "enum nvme_status_field" "May 2025" "API Manual" LINUX
 .SH NAME
 enum nvme_status_field \- Defines all parts of the nvme status field: status code, status code type, and additional flags.
 .SH SYNOPSIS
@@ -184,6 +184,22 @@ enum nvme_status_field {
 , 
 .br
 .br
+.BI "    NVME_SC_INVALID_KEY_TAG"
+, 
+.br
+.br
+.BI "    NVME_SC_HOST_DISPERSED_NS_NOT_ENABLED"
+, 
+.br
+.br
+.BI "    NVME_SC_HOST_ID_NOT_INITIALIZED"
+, 
+.br
+.br
+.BI "    NVME_SC_INCORRECT_KEY"
+, 
+.br
+.br
 .BI "    NVME_SC_FDP_DISABLED"
 , 
 .br
@@ -209,6 +225,26 @@ enum nvme_status_field {
 .br
 .br
 .BI "    NVME_SC_FORMAT_IN_PROGRESS"
+, 
+.br
+.br
+.BI "    NVME_SC_INVALID_VALUE_SIZE"
+, 
+.br
+.br
+.BI "    NVME_SC_INVALID_KEY_SIZE"
+, 
+.br
+.br
+.BI "    NVME_SC_KV_KEY_NOT_EXISTS"
+, 
+.br
+.br
+.BI "    NVME_SC_UNRECOVERED_ERROR"
+, 
+.br
+.br
+.BI "    NVME_SC_KEY_EXISTS"
 , 
 .br
 .br
@@ -413,6 +449,26 @@ enum nvme_status_field {
 .br
 .br
 .BI "    NVME_SC_ZONEGRP_ORIGINATOR_INVLD"
+, 
+.br
+.br
+.BI "    NVME_SC_INVALID_CONTROLER_DATA_QUEUE"
+, 
+.br
+.br
+.BI "    NVME_SC_NOT_ENOUGH_RESOURCES"
+, 
+.br
+.br
+.BI "    NVME_SC_CONTROLLER_SUSPENDED"
+, 
+.br
+.br
+.BI "    NVME_SC_CONTROLLER_NOT_SUSPENDED"
+, 
+.br
+.br
+.BI "    NVME_SC_CONTROLLER_DATA_QUEUE_FULL"
 , 
 .br
 .br
@@ -797,6 +853,18 @@ the Command and Feature Lockdown.
 Admin Command Media Not Ready: The Admin
 command requires access to media and
 the media is not ready.
+.IP "NVME_SC_INVALID_KEY_TAG" 12
+The command was aborted due to an invalid KEYTAG
+field value.
+.IP "NVME_SC_HOST_DISPERSED_NS_NOT_ENABLED" 12
+The command is prohibited while the
+Host Disperesed Namespace Support (HDISNS) field is not
+set to 1h in the Host Behavior Support feature.
+.IP "NVME_SC_HOST_ID_NOT_INITIALIZED" 12
+Host Identifier Not Initialized.
+.IP "NVME_SC_INCORRECT_KEY" 12
+The command was aborted due to the key associated
+with the KEYTAG field being incorrect.
 .IP "NVME_SC_FDP_DISABLED" 12
 Command is not allowed when
 Flexible Data Placement is disabled.
@@ -827,6 +895,20 @@ namespace.
 .IP "NVME_SC_FORMAT_IN_PROGRESS" 12
 Format In Progress: A Format NVM command
 is in progress on the namespace.
+.IP "NVME_SC_INVALID_VALUE_SIZE" 12
+The value size is not valid.
+.IP "NVME_SC_INVALID_KEY_SIZE" 12
+The KV key size is not valid.
+.IP "NVME_SC_KV_KEY_NOT_EXISTS" 12
+The Store If Key Exists (SIKE) bit is set to
+'1' in the Store Option field and the KV key does not
+exists.
+.IP "NVME_SC_UNRECOVERED_ERROR" 12
+There was an unrecovered error when reading
+from the meidum.
+.IP "NVME_SC_KEY_EXISTS" 12
+The Store If No Key Exists (SINKE) bit is set to '1'
+in the Store Option field and the KV key exists.
 .IP "NVME_SC_CQ_INVALID" 12
 Completion Queue Invalid: The Completion
 Queue identifier specified in the command
@@ -1035,6 +1117,25 @@ The NQN contained in the ZoneGroup
 Originator field does not match the
 Host NQN used by the DDC to connect
 to the CDC.
+.IP "NVME_SC_INVALID_CONTROLER_DATA_QUEUE" 12
+This error indicates that the
+specified Controller Data Queue
+Identifier is invalid for the controller
+processing the command.
+.IP "NVME_SC_NOT_ENOUGH_RESOURCES" 12
+This error indicates that there is not
+enough resources in the controller to
+process the command.
+.IP "NVME_SC_CONTROLLER_SUSPENDED" 12
+The operation requested is not allowed if
+the specified controller is suspended.
+.IP "NVME_SC_CONTROLLER_NOT_SUSPENDED" 12
+The operation requested is not allowed if
+the specified controller is not
+suspended.
+.IP "NVME_SC_CONTROLLER_DATA_QUEUE_FULL" 12
+The controller detected that a
+Controller Data Queue became full.
 .IP "NVME_SC_BAD_ATTRIBUTES" 12
 Conflicting Dataset Management Attributes
 .IP "NVME_SC_INVALID_PI" 12

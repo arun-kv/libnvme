@@ -11,7 +11,8 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include "tree.h"
+
+#include <nvme/tree.h>
 
 /**
  * DOC: fabrics.h
@@ -37,6 +38,7 @@
  * @tos:		Type of service
  * @keyring:		Keyring to store and lookup keys
  * @tls_key:		TLS PSK for the connection
+ * @tls_configured_key: TLS PSK for connect command for the connection
  * @duplicate_connect:	Allow multiple connections to the same target
  * @disable_sqflow:	Disable controller sq flow control
  * @hdr_digest:		Generate/verify header digest (TCP)
@@ -56,8 +58,9 @@ struct nvme_fabrics_config {
 	int nr_write_queues;
 	int nr_poll_queues;
 	int tos;
-	int keyring;
-	int tls_key;
+	long keyring;
+	long tls_key;
+	long tls_configured_key;
 
 	bool duplicate_connect;
 	bool disable_sqflow;
@@ -65,6 +68,28 @@ struct nvme_fabrics_config {
 	bool data_digest;
 	bool tls;
 	bool concat;
+};
+
+/**
+ * struct nvme_fabrics_uri - Parsed URI structure
+ * @scheme:		Scheme name (typically 'nvme')
+ * @protocol:		Optional protocol/transport (e.g. 'tcp')
+ * @userinfo:		Optional user information component of the URI authority
+ * @host:		Host transport address
+ * @port:		The port subcomponent or 0 if not specified
+ * @path_segments:	NULL-terminated array of path segments
+ * @query:		Optional query string component (separated by '?')
+ * @fragment:		Optional fragment identifier component (separated by '#')
+ */
+struct nvme_fabrics_uri {
+	char *scheme;
+	char *protocol;
+	char *userinfo;
+	char *host;
+	int port;
+	char **path_segments;
+	char *query;
+	char *fragment;
 };
 
 /**
@@ -200,6 +225,17 @@ int nvmf_add_ctrl(nvme_host_t h, nvme_ctrl_t c,
 		  const struct nvme_fabrics_config *cfg);
 
 /**
+ * nvmf_connect_ctrl() - Connect a controller
+ * @c:		Controller to be connected
+ *
+ * Issues a 'connect' command to the NVMe-oF controller.
+ * @c must be initialized and not connected to the topology.
+ *
+ * Return: 0 on success; on failure errno is set and -1 is returned.
+ */
+int nvmf_connect_ctrl(nvme_ctrl_t c);
+
+/**
  * nvmf_get_discovery_log() - Return the discovery log page
  * @c:			Discovery controller to use
  * @logp:		Pointer to the log page to be returned
@@ -256,6 +292,26 @@ struct nvmf_discovery_log *nvmf_get_discovery_wargs(struct nvme_get_discovery_ar
  * identifier, or NULL if not successful.
  */
 char *nvmf_hostnqn_generate();
+
+/**
+ * nvmf_hostnqn_generate_from_hostid() - Generate a host nqn from host identifier
+ * @hostid:		Host identifier
+ *
+ * If @hostid is NULL, the function generates it based on the machine
+ * identifier.
+ *
+ * Return: On success, an NVMe Qualified Name for host identification. This
+ * name is based on the given host identifier. On failure, NULL.
+ */
+char *nvmf_hostnqn_generate_from_hostid(char *hostid);
+
+/**
+ * nvmf_hostid_generate() - Generate a machine specific host identifier
+ *
+ * Return: On success, an identifier string based on the machine identifier to
+ * be used as NVMe Host Identifier, or NULL on failure.
+ */
+char *nvmf_hostid_generate();
 
 /**
  * nvmf_hostnqn_from_file() - Reads the host nvm qualified name from the config
@@ -323,5 +379,27 @@ bool nvmf_is_registration_supported(nvme_ctrl_t c);
  * Return: 0 on success; on failure -1 is returned and errno is set
  */
 int nvmf_register_ctrl(nvme_ctrl_t c, enum nvmf_dim_tas tas, __u32 *result);
+
+/**
+ * nvme_parse_uri() - Parse the URI string
+ * @str:	URI string
+ *
+ * Parse the URI string as defined in the NVM Express Boot Specification.
+ * Supported URI elements looks as follows:
+ *
+ *   nvme+tcp://user@host:port/subsys_nqn/nid?query=val#fragment
+ *
+ * Return: &nvme_fabrics_uri structure on success; NULL on failure with errno
+ * set.
+ */
+struct nvme_fabrics_uri *nvme_parse_uri(const char *str);
+
+/**
+ * nvme_free_uri() - Free the URI structure
+ * @uri:	&nvme_fabrics_uri structure
+ *
+ * Free an &nvme_fabrics_uri structure.
+ */
+void nvme_free_uri(struct nvme_fabrics_uri *uri);
 
 #endif /* _LIBNVME_FABRICS_H */

@@ -19,6 +19,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <libnvme.h>
+#include <sys/stat.h>
 
 #include <ccan/endian/endian.h>
 
@@ -49,8 +50,8 @@ static void save_telemetry(nvme_ctrl_t c)
 		return;
 
 	s = time(NULL);
-	ret = snprintf(buf, sizeof(buf), "/var/log/%s-telemetry-%ld",
-		nvme_ctrl_get_subsysnqn(c), s);
+	ret = snprintf(buf, sizeof(buf), "/var/log/%s-telemetry-%llu",
+		       nvme_ctrl_get_subsysnqn(c), (unsigned long long)s);
 	if (ret < 0) {
 		free(log);
 		return;

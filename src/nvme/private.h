@@ -13,13 +13,15 @@
 #include <poll.h>
 #include <sys/socket.h>
 
-#include "fabrics.h"
-#include "mi.h"
+#include <nvme/fabrics.h>
+#include <nvme/mi.h>
 
-
-char *nvme_ctrl_sysfs_dir(void);
-char *nvme_subsys_sysfs_dir(void);
-char *nvme_ns_sysfs_dir(void);
+const char *nvme_subsys_sysfs_dir(void);
+const char *nvme_ctrl_sysfs_dir(void);
+const char *nvme_ns_sysfs_dir(void);
+const char *nvme_slots_sysfs_dir(void);
+const char *nvme_uuid_ibm_filename(void);
+const char *nvme_dmi_entries_dir(void);
 
 struct nvme_path {
 	struct list_node entry;
@@ -31,15 +33,24 @@ struct nvme_path {
 	char *name;
 	char *sysfs_dir;
 	char *ana_state;
+	char *numa_nodes;
 	int grpid;
+	int queue_depth;
+};
+
+struct nvme_ns_head {
+	struct list_head paths;
+	struct nvme_ns *n;
+
+	char *sysfs_dir;
 };
 
 struct nvme_ns {
 	struct list_node entry;
-	struct list_head paths;
 
 	struct nvme_subsystem *s;
 	struct nvme_ctrl *c;
+	struct nvme_ns_head *head;
 
 	int fd;
 	__u32 nsid;
@@ -82,7 +93,11 @@ struct nvme_ctrl {
 	char *trsvcid;
 	char *dhchap_key;
 	char *dhchap_ctrl_key;
+	char *keyring;
+	char *tls_key_identity;
+	char *tls_key;
 	char *cntrltype;
+	char *cntlid;
 	char *dctype;
 	char *phy_slot;
 	bool discovery_ctrl;
@@ -156,17 +171,22 @@ struct nvme_fabric_options {
 	bool trsvcid;
 };
 
+struct nvme_log {
+	int fd;
+	int level;
+	bool pid;
+	bool timestamp;
+};
+
 struct nvme_root {
 	char *config_file;
 	char *application;
 	struct list_head hosts;
 	struct list_head endpoints; /* MI endpoints */
-	FILE *fp;
-	int log_level;
-	bool log_pid;
-	bool log_timestamp;
+	struct nvme_log log;
 	bool modified;
 	bool mi_probe_enabled;
+	bool create_only;
 	struct nvme_fabric_options *options;
 };
 
@@ -185,6 +205,8 @@ nvme_ctrl_t __nvme_lookup_ctrl(nvme_subsystem_t s, const char *transport,
 
 void *__nvme_alloc(size_t len);
 
+void *__nvme_realloc(void *p, size_t len);
+
 #if (LOG_FUNCNAME == 1)
 #define __nvme_log_func __func__
 #else
@@ -192,14 +214,10 @@ void *__nvme_alloc(size_t len);
 #endif
 
 void __attribute__((format(printf, 4, 5)))
-__nvme_msg(nvme_root_t r, int lvl, const char *func, const char *format, ...);
+__nvme_msg(nvme_root_t r, int level, const char *func, const char *format, ...);
 
-#define nvme_msg(r, lvl, format, ...)					\
-	do {								\
-		if ((lvl) <= MAX_LOGLEVEL)				\
-			__nvme_msg(r, lvl, __nvme_log_func,		\
-				   format, ##__VA_ARGS__);		\
-	} while (0)
+#define nvme_msg(r, level, format, ...)					\
+	__nvme_msg(r, level, __nvme_log_func, format, ##__VA_ARGS__)
 
 #define root_from_ctrl(c) ((c)->s && (c)->s->h ? (c)->s->h->r : NULL)
 #define root_from_ns(n) ((n)->s && (n)->s->h ? (n)->s->h->r : \
@@ -234,6 +252,20 @@ struct nvme_mi_transport {
 	void (*close)(struct nvme_mi_ep *ep);
 	int (*desc_ep)(struct nvme_mi_ep *ep, char *buf, size_t len);
 	int (*check_timeout)(struct nvme_mi_ep *ep, unsigned int timeout);
+	int (*aem_fd)(struct nvme_mi_ep *ep);
+	int (*aem_read)(struct nvme_mi_ep *ep,
+			  struct nvme_mi_resp *resp);
+	int (*aem_purge)(struct nvme_mi_ep *ep);
+};
+
+struct nvme_mi_aem_ctx {
+	struct nvme_mi_aem_occ_list_hdr *occ_header;
+	struct nvme_mi_aem_occ_data *list_start;
+	struct nvme_mi_aem_occ_data *list_current;
+	int list_current_index;
+	struct nvme_mi_aem_config callbacks;
+	int last_generation_num;
+	struct nvme_mi_event event;
 };
 
 /* quirks */
@@ -244,21 +276,31 @@ struct nvme_mi_transport {
  */
 #define NVME_QUIRK_MIN_INTER_COMMAND_TIME	(1 << 0)
 
+/* Some devices may not support using CSI 1.  Attempting to set an
+ * endpoint to use this with these devices should return an error
+ */
+#define NVME_QUIRK_CSI_1_NOT_SUPPORTED          (1 << 1)
+
 struct nvme_mi_ep {
 	struct nvme_root *root;
 	const struct nvme_mi_transport *transport;
 	void *transport_data;
 	struct list_node root_entry;
 	struct list_head controllers;
+	bool quirks_probed;
 	bool controllers_scanned;
 	unsigned int timeout;
 	unsigned int mprt_max;
 	unsigned long quirks;
 
+	__u8 csi;
+
 	/* inter-command delay, for NVME_QUIRK_MIN_INTER_COMMAND_TIME */
 	unsigned int inter_command_us;
 	struct timespec last_resp_time;
 	bool last_resp_time_valid;
+
+	struct nvme_mi_aem_ctx *aem_ctx;
 };
 
 struct nvme_mi_ctrl {
@@ -278,12 +320,19 @@ __u32 nvme_mi_crc32_update(__u32 crc, void *data, size_t len);
  * in the shared lib */;
 struct mctp_ioc_tag_ctl;
 struct __mi_mctp_socket_ops {
-	int (*socket)(int, int, int);
+	int (*msg_socket)(void);
+	int (*aem_socket)(__u8 eid, unsigned int network);
 	ssize_t (*sendmsg)(int, const struct msghdr *, int);
 	ssize_t (*recvmsg)(int, struct msghdr *, int);
 	int (*poll)(struct pollfd *, nfds_t, int);
 	int (*ioctl_tag)(int, unsigned long, struct mctp_ioc_tag_ctl *);
 };
 void __nvme_mi_mctp_set_ops(const struct __mi_mctp_socket_ops *newops);
+
+#define SECTOR_SIZE	512
+#define SECTOR_SHIFT	9
+
+int __nvme_import_keys_from_config(nvme_host_t h, nvme_ctrl_t c,
+				   long *keyring_id, long *key_id);
 
 #endif /* _LIBNVME_PRIVATE_H */

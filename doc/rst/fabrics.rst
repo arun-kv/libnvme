@@ -27,8 +27,9 @@ Fabrics-specific definitions.
     int nr_write_queues;
     int nr_poll_queues;
     int tos;
-    int keyring;
-    int tls_key;
+    long keyring;
+    long tls_key;
+    long tls_configured_key;
     bool duplicate_connect;
     bool disable_sqflow;
     bool hdr_digest;
@@ -78,6 +79,9 @@ Fabrics-specific definitions.
 ``tls_key``
   TLS PSK for the connection
 
+``tls_configured_key``
+  TLS PSK for connect command for the connection
+
 ``duplicate_connect``
   Allow multiple connections to the same target
 
@@ -95,6 +99,55 @@ Fabrics-specific definitions.
 
 ``concat``
   Enable secure concatenation (TCP)
+
+
+
+
+
+.. c:struct:: nvme_fabrics_uri
+
+   Parsed URI structure
+
+**Definition**
+
+::
+
+  struct nvme_fabrics_uri {
+    char *scheme;
+    char *protocol;
+    char *userinfo;
+    char *host;
+    int port;
+    char **path_segments;
+    char *query;
+    char *fragment;
+  };
+
+**Members**
+
+``scheme``
+  Scheme name (typically 'nvme')
+
+``protocol``
+  Optional protocol/transport (e.g. 'tcp')
+
+``userinfo``
+  Optional user information component of the URI authority
+
+``host``
+  Host transport address
+
+``port``
+  The port subcomponent or 0 if not specified
+
+``path_segments``
+  NULL-terminated array of path segments
+
+``query``
+  Optional query string component (separated by '?')
+
+``fragment``
+  Optional fragment identifier component (separated by '#')
 
 
 
@@ -327,6 +380,25 @@ into the topology using **h** as parent.
 0 on success; on failure errno is set and -1 is returned.
 
 
+.. c:function:: int nvmf_connect_ctrl (nvme_ctrl_t c)
+
+   Connect a controller
+
+**Parameters**
+
+``nvme_ctrl_t c``
+  Controller to be connected
+
+**Description**
+
+Issues a 'connect' command to the NVMe-oF controller.
+**c** must be initialized and not connected to the topology.
+
+**Return**
+
+0 on success; on failure errno is set and -1 is returned.
+
+
 .. c:function:: int nvmf_get_discovery_log (nvme_ctrl_t c, struct nvmf_discovery_log **logp, int max_retries)
 
    Return the discovery log page
@@ -432,6 +504,38 @@ on failure and errno is set.
 
 An nvm namespace qualified name string based on the machine
 identifier, or NULL if not successful.
+
+
+.. c:function:: char * nvmf_hostnqn_generate_from_hostid (char *hostid)
+
+   Generate a host nqn from host identifier
+
+**Parameters**
+
+``char *hostid``
+  Host identifier
+
+**Description**
+
+If **hostid** is NULL, the function generates it based on the machine
+identifier.
+
+**Return**
+
+On success, an NVMe Qualified Name for host identification. This
+name is based on the given host identifier. On failure, NULL.
+
+
+.. c:function:: char * nvmf_hostid_generate ()
+
+   Generate a machine specific host identifier
+
+**Parameters**
+
+**Return**
+
+On success, an identifier string based on the machine identifier to
+be used as NVMe Host Identifier, or NULL on failure.
 
 
 .. c:function:: char * nvmf_hostnqn_from_file ()
@@ -541,5 +645,41 @@ tasks are supported: register, deregister, and registration update.
 **Return**
 
 0 on success; on failure -1 is returned and errno is set
+
+
+.. c:function:: struct nvme_fabrics_uri * nvme_parse_uri (const char *str)
+
+   Parse the URI string
+
+**Parameters**
+
+``const char *str``
+  URI string
+
+**Description**
+
+Parse the URI string as defined in the NVM Express Boot Specification.
+Supported URI elements looks as follows:
+
+  nvme+tcp://user**host**:port/subsys_nqn/nid?query=val#fragment
+
+**Return**
+
+:c:type:`nvme_fabrics_uri` structure on success; NULL on failure with errno
+set.
+
+
+.. c:function:: void nvme_free_uri (struct nvme_fabrics_uri *uri)
+
+   Free the URI structure
+
+**Parameters**
+
+``struct nvme_fabrics_uri *uri``
+  :c:type:`nvme_fabrics_uri` structure
+
+**Description**
+
+Free an :c:type:`nvme_fabrics_uri` structure.
 
 

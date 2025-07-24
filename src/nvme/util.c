@@ -12,6 +12,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <errno.h>
+#include <malloc.h>
 
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -21,6 +22,7 @@
 #include <netdb.h>
 #include <unistd.h>
 
+#include <ccan/ccan/minmax/minmax.h>
 #include <ccan/endian/endian.h>
 
 #include "cleanup.h"
@@ -51,6 +53,10 @@ static inline __u8 nvme_generic_status_to_errno(__u16 status)
 	case NVME_SC_PRP_INVALID_OFFSET:
 	case NVME_SC_CMB_INVALID_USE:
 	case NVME_SC_KAT_INVALID:
+	case NVME_SC_INVALID_KEY_TAG:
+	case NVME_SC_INCORRECT_KEY:
+	case NVME_SC_INVALID_VALUE_SIZE:
+	case NVME_SC_INVALID_KEY_SIZE:
 		return EINVAL;
 	case NVME_SC_CMDID_CONFLICT:
 		return EADDRINUSE;
@@ -226,11 +232,20 @@ static const char * const generic_status[] = {
 	[NVME_SC_TRAN_TPORT_ERROR]		  = "Transient Transport Error: A transient transport error was detected",
 	[NVME_SC_PROHIBITED_BY_CMD_AND_FEAT]	  = "Command Prohibited by Command and Feature Lockdown: The command was aborted due to command execution being prohibited by the Command and Feature Lockdown",
 	[NVME_SC_ADMIN_CMD_MEDIA_NOT_READY]	  = "Admin Command Media Not Ready: The Admin command requires access to media and the media is not ready",
+	[NVME_SC_INVALID_KEY_TAG]		  = "The command was aborted due to an invalid KEYTAG field value",
+	[NVME_SC_HOST_DISPERSED_NS_NOT_ENABLED]	  = "The command is prohibited while the Host Disperesed Namespace Support (HDISNS) field is not set to 1h in the Host Behavior Support feature",
+	[NVME_SC_HOST_ID_NOT_INITIALIZED]	  = "Host Identifier Not Initialized",
+	[NVME_SC_INCORRECT_KEY]			  = "The command was aborted due to the key associated with the KEYTAG field being incorrect",
 	[NVME_SC_LBA_RANGE]			  = "LBA Out of Range: The command references an LBA that exceeds the size of the namespace",
 	[NVME_SC_CAP_EXCEEDED]			  = "Capacity Exceeded: Execution of the command has caused the capacity of the namespace to be exceeded",
 	[NVME_SC_NS_NOT_READY]			  = "Namespace Not Ready: The namespace is not ready to be accessed",
 	[NVME_SC_RESERVATION_CONFLICT]		  = "Reservation Conflict: The command was aborted due to a conflict with a reservation held on the accessed namespace",
 	[NVME_SC_FORMAT_IN_PROGRESS]		  = "Format In Progress: A Format NVM command is in progress on the namespace",
+	[NVME_SC_INVALID_VALUE_SIZE]		  = "The value size is not valid",
+	[NVME_SC_INVALID_KEY_SIZE]		  = "The KV key size is not valid",
+	[NVME_SC_KV_KEY_NOT_EXISTS]		  = "The Store If Key Exists (SIKE) bit is set to '1' in the Store Option field and the KV key does not exists",
+	[NVME_SC_UNRECOVERED_ERROR]		  = "There was an unrecovered error when reading from the medium",
+	[NVME_SC_KEY_EXISTS]			  = "The Store If No Key Exists (SINKE) bit is set to '1' in the Store Option field and the KV key exists",
 };
 
 static const char * const cmd_spec_status[] = {
@@ -285,6 +300,11 @@ static const char * const cmd_spec_status[] = {
 	[NVME_SC_INSUFFICIENT_DISC_RES]		  = "Discovery Info entries exceed Discovery Controller's capacity",
 	[NVME_SC_REQSTD_FUNCTION_DISABLED]        = "Fabric Zoning is not enabled on the CDC",
 	[NVME_SC_ZONEGRP_ORIGINATOR_INVLD]        = "The NQN contained in the ZoneGroup Originator field does not match the Host NQN used by the DDC to connect to the CDC",
+	[NVME_SC_INVALID_CONTROLER_DATA_QUEUE]	  = "Invalid Controller Data Queue",
+	[NVME_SC_NOT_ENOUGH_RESOURCES]		  = "Not Enough Resources",
+	[NVME_SC_CONTROLLER_SUSPENDED]		  = "Controller Suspended: Operation failed because the controller is currently in a suspended state",
+	[NVME_SC_CONTROLLER_NOT_SUSPENDED]	  = "Controller Not Suspended: Operation failed because the controller is not in a suspended state",
+	[NVME_SC_CONTROLLER_DATA_QUEUE_FULL]	  = "Controller Data Queue Full",
 };
 
 static const char * const nvm_status[] = {
@@ -542,6 +562,12 @@ int nvme_get_feature_length(int fid, __u32 cdw11, __u32 *len)
 	case NVME_FEAT_FID_NS_METADATA:
 		*len = sizeof(struct nvme_host_metadata);
 		break;
+	case NVME_FEAT_FID_PERF_CHARACTERISTICS:
+		*len = sizeof(struct nvme_perf_characteristics);
+		break;
+	case NVME_FEAT_FID_FDP_EVENTS:
+		*len = NVME_FEAT_FDPE_NOET_MASK * sizeof(struct nvme_fdp_supported_event_desc);
+		break;
 	default:
 		errno = EINVAL;
 		return -1;
@@ -619,6 +645,8 @@ static const char * const libnvme_status[] = {
 	[ENVME_CONNECT_OPNOTSUPP] = "not supported",
 	[ENVME_CONNECT_CONNREFUSED] = "connection refused",
 	[ENVME_CONNECT_ADDRNOTAVAIL] = "cannot assign requested address",
+	[ENVME_CONNECT_IGNORED] = "connection ignored",
+	[ENVME_CONNECT_NOKEY] = "pre-shared TLS key is missing"
 };
 
 const char *nvme_errno_to_string(int status)
@@ -1134,4 +1162,18 @@ void *__nvme_alloc(size_t len)
 
 	memset(p, 0, _len);
 	return p;
+}
+
+void *__nvme_realloc(void *p, size_t len)
+{
+	size_t old_len = malloc_usable_size(p);
+
+	void *result = __nvme_alloc(len);
+
+	if (p && result) {
+		memcpy(result, p, min(old_len, len));
+		free(p);
+	}
+
+	return result;
 }
