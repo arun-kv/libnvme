@@ -327,6 +327,10 @@ enum nvme_cmd_dword_fields {
 	NVME_ZNS_MGMT_RECV_ZRAS_FEAT_MASK			= 0x1,
 	NVME_DIM_TAS_SHIFT					= 0,
 	NVME_DIM_TAS_MASK					= 0xF,
+	NVME_ABORT_CDW10_SQID_SHIFT                             = 0,
+        NVME_ABORT_CDW10_SQID_MASK                              = 0xff,
+        NVME_ABORT_CDW10_CID_SHIFT                              = 16,
+        NVME_ABORT_CDW10_CID_MASK                               = 0xffff
 };
 
 /**

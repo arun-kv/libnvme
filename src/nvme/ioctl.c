@@ -558,6 +558,7 @@ int nvme_abort(struct nvme_abort_args *args)
 		return -1;
 	}
 	return nvme_submit_admin_passthru(args->fd, &cmd, args->result);
+}
 
 
 static int read_ana_chunk(int fd, enum nvme_log_ana_lsp lsp, bool rae,
